@@ -43,6 +43,30 @@ uploaded_files = st.file_uploader(
 )
 
 
+def get_best_available_model(client_instance):
+    """動態尋找該 API Key 當前可用且最適合的 Gemini Flash 模型"""
+    candidate_models = [
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+    ]
+    try:
+        # 動態列出目前 API Key 支援的所有模型
+        available = [m.name for m in client_instance.models.list()]
+        for candidate in candidate_models:
+            for avail in available:
+                if candidate in avail:
+                    return avail
+        for avail in available:
+            if "flash" in avail.lower() and "gemini" in avail.lower():
+                return avail
+        if available:
+            return available[0]
+    except Exception:
+        pass
+    return "gemini-2.5-flash"
+
+
 def process_images_with_gemini(files):
     results = []
     prompt = """
@@ -52,6 +76,10 @@ def process_images_with_gemini(files):
     
     請直接輸出 JSON 格式，如：{"date": "20260603", "amount": 150}
     """
+
+    # 取得自動偵測到的最佳模型
+    selected_model = get_best_available_model(client)
+
     for uploaded_file in files:
         bytes_data = uploaded_file.read()
 
@@ -63,25 +91,26 @@ def process_images_with_gemini(files):
         else:
             mime_type = "image/jpeg"
 
-        # 優先嘗試模型順序：gemini-2.0-flash -> gemini-1.5-flash
-        try:
-            response = client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=[
-                    types.Part.from_bytes(data=bytes_data, mime_type=mime_type),
-                    prompt,
-                ],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json"
-                ),
-            )
-            res_json = json.loads(response.text)
-            results.append(res_json)
-        except Exception as e1:
+        # 多重候選模型嘗試清單，確保不漏接
+        models_to_try = [
+            selected_model,
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
+        ]
+
+        seen = set()
+        unique_models = [
+            m for m in models_to_try if not (m in seen or seen.add(m))
+        ]
+
+        success = False
+        last_error = None
+
+        for model_name in unique_models:
             try:
-                # 備援模型嘗試
                 response = client.models.generate_content(
-                    model="gemini-1.5-flash",
+                    model=model_name,
                     contents=[
                         types.Part.from_bytes(
                             data=bytes_data, mime_type=mime_type
@@ -94,14 +123,21 @@ def process_images_with_gemini(files):
                 )
                 res_json = json.loads(response.text)
                 results.append(res_json)
-            except Exception as e2:
-                st.error(
-                    f"❌ 解析檔案 『{uploaded_file.name}』 時發生錯誤：{e2}"
-                )
-                st.info(
-                    "💡 請檢查 API Key 是否正確，或檔案內容是否清晰包含發票金額與日期。"
-                )
-                st.stop()
+                success = True
+                break
+            except Exception as e:
+                last_error = e
+                continue
+
+        if not success:
+            st.error(
+                f"❌ 解析檔案 『{uploaded_file.name}』 時失敗：{last_error}"
+            )
+            st.warning(
+                "💡 **若持續失敗，請檢查 API Key 來源**：\n"
+                "建議前往 [Google AI Studio (aistudio.google.com)](https://aistudio.google.com/) 重新建立一組免費 Key 即可順利解決！"
+            )
+            st.stop()
 
     results.sort(key=lambda x: x["date"])
     return results
