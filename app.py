@@ -9,7 +9,7 @@ import xlrd
 from xlutils.copy import copy
 
 # 版本別定義
-APP_VERSION = "20260811-3"
+APP_VERSION = "20260811-4"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -111,14 +111,9 @@ def process_images_with_gemini(files):
             st.error(
                 f"❌ 解析檔案 『{uploaded_file.name}』 時失敗：{last_error}"
             )
-            st.error("🚨 **根本原因：該 GCP 專案未開通 Generative Language API**")
-            st.markdown("""
-            **請點擊下方按鈕直接一鍵開啟 API 服務：**
-            
-            👉 **[點此直接前往開啟 GCP API 服務](https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com)**
-            
-            開啟後不用更換 Key，回到本頁面重新執行即可！
-            """)
+            st.error(
+                "🚨 **未開通 API 服務**：請點擊上方連結進入 Google Console 點選『Enable (啟用)』即可恢復正常。"
+            )
             st.stop()
 
     results.sort(key=lambda x: x["date"])
