@@ -1,4 +1,4 @@
-# 📌 程式版本：20260811-WORD-PAGE-ROTATE-FIX
+# 📌 程式版本：20260811-SINGLE-PAGE-EXIF-FIX
 streamlit
 google-generativeai
 openpyxl
