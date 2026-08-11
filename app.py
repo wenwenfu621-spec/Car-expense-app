@@ -3,11 +3,10 @@ import json
 import os
 import tempfile
 import google.generativeai as genai
+import openpyxl
 import streamlit as st
-import xlrd
-from xlutils.copy import copy
 
-APP_VERSION = "20260811-FORMULA-BORDER-FIX"
+APP_VERSION = "20260811-OPENPYXL-FIX"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -15,7 +14,7 @@ st.set_page_config(
 
 st.caption(f"📌 程式版本：`{APP_VERSION}`")
 
-# 標題樣式
+# 標題樣式 (保持單一行)
 st.markdown(
     "<h2 style='font-size: 1.75rem; font-weight: 700; white-space: nowrap; margin-top: -10px;'>🚗 私車公用補助單自動化填寫工具</h2>",
     unsafe_allow_html=True,
@@ -205,102 +204,116 @@ if "parsed_receipts" in st.session_state:
             )
 
     if st.button("🚀 產出 Excel 報銷檔案"):
-        template_path = "私車公用補助申請單.xls"
+        # 優先找 xlsx，若無則找 xls
+        template_xlsx = "私車公用補助申請單.xlsx"
+        template_xls = "私車公用補助申請單.xls"
 
-        if not os.path.exists(template_path):
-            st.error("系統找不到預設範本『私車公用補助申請單.xls』！")
+        use_openpyxl = False
+        template_path = None
+
+        if os.path.exists(template_xlsx):
+            template_path = template_xlsx
+            use_openpyxl = True
+        elif os.path.exists(template_xls):
+            template_path = template_xls
+            use_openpyxl = False
+
+        if not template_path:
+            st.error("系統找不到預設範本『私車公用補助申請單』！")
         else:
-            rb = xlrd.open_workbook(template_path, formatting_info=True)
-            wb = copy(rb)
+            if use_openpyxl:
+                # 使用 openpyxl：100% 保留公式與原本邊框
+                wb = openpyxl.load_workbook(template_path)
 
-            def write_with_style(wt_sheet, rd_sheet, wb_copy, row, col, value):
-                """透過 cell_xf_index 抓取儲存格完整邊框與樣式寫入"""
-                try:
-                    xf_idx = rd_sheet.cell_xf_index(row, col)
-                    style = wb_copy.get_xf_style(xf_idx)
-                    wt_sheet.write(row, col, value, style)
-                except Exception:
-                    wt_sheet.write(row, col, value)
+                # Sheet 1: 私車公用單
+                sheet1 = wb.worksheets[0]
+                sheet1["B3"] = user_name
+                sheet1["E3"] = user_dept
 
-            # Sheet 1: 私車公用單
-            rd_sheet1 = rb.sheet_by_index(0)
-            sheet1 = wb.get_sheet(0)
+                for i, item in enumerate(details):
+                    row = 5 + i  # openpyxl 索引從 1 開始，第 5 列開始寫
+                    sheet1.cell(row=row, column=1, value=item["date"])  # A
+                    sheet1.cell(row=row, column=2, value=item["location"])  # B
+                    sheet1.cell(row=row, column=4, value=item["km"])  # D
+                    sheet1.cell(row=row, column=5, value=item["parking"])  # E
+                    sheet1.cell(row=row, column=6, value=item["toll"])  # F
+                    sheet1.cell(row=row, column=8, value=item["reason"])  # H
 
-            # 設定列印自適應頁面
-            sheet1.fit_num_pages = 1
-            sheet1.fit_width_to_pages = 1
-            sheet1.fit_height_to_pages = 1
+                # Sheet 2: 支出憑單
+                sheet2 = wb.worksheets[1]
+                today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
+                sheet2["G5"] = today_str
+                sheet2["C7"] = user_dept
 
-            write_with_style(sheet1, rd_sheet1, wb, 2, 1, user_name)  # B3
-            write_with_style(sheet1, rd_sheet1, wb, 2, 3, user_dept)  # E3
+                first_date = details[0]["date"]
+                last_date = details[-1]["date"]
+                sheet2["A9"] = f"{first_date}~{last_date}交通費用"
 
-            total_km = sum(item["km"] for item in details)
-            total_parking = sum(item["parking"] for item in details)
-            total_toll = sum(item["toll"] for item in details)
-            total_parking_and_toll = total_parking + total_toll
-
-            # 寫入單據明細列
-            for i, item in enumerate(details):
-                row = 4 + i
-                write_with_style(sheet1, rd_sheet1, wb, row, 0, item["date"])
-                write_with_style(
-                    sheet1, rd_sheet1, wb, row, 1, item["location"]
+                output_date = datetime.datetime.now().strftime("%Y%m%d")
+                out_filename = (
+                    f"私車公用補助申請單-{user_name}-{output_date}.xlsx"
                 )
-                write_with_style(sheet1, rd_sheet1, wb, row, 3, item["km"])
-                write_with_style(sheet1, rd_sheet1, wb, row, 4, item["parking"])
-                write_with_style(sheet1, rd_sheet1, wb, row, 5, item["toll"])
-                write_with_style(sheet1, rd_sheet1, wb, row, 7, item["reason"])
 
-            # 寫入第 27 列小計 (公里數、停車費、回數票)
-            write_with_style(sheet1, rd_sheet1, wb, 26, 3, total_km)
-            write_with_style(sheet1, rd_sheet1, wb, 26, 4, total_parking)
-            write_with_style(sheet1, rd_sheet1, wb, 26, 5, total_toll)
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=".xlsx"
+                ) as tmp:
+                    wb.save(tmp.name)
+                    tmp_path = tmp.name
 
-            # 寫入第 28 列總金額 (紅圈處 C28 / D28)
-            write_with_style(
-                sheet1, rd_sheet1, wb, 27, 2, total_parking_and_toll
-            )
-            write_with_style(
-                sheet1, rd_sheet1, wb, 27, 3, total_parking_and_toll
-            )
+                with open(tmp_path, "rb") as file:
+                    st.download_button(
+                        label="📥 點擊下載報銷單 (Excel)",
+                        data=file,
+                        file_name=out_filename,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+            else:
+                # 備援：使用 xlrd/xlutils 寫入，且不覆蓋公式與合計儲存格
+                import xlrd
+                from xlutils.copy import copy
 
-            # Sheet 2: 支出憑單
-            rd_sheet2 = rb.sheet_by_index(1)
-            sheet2 = wb.get_sheet(1)
+                rb = xlrd.open_workbook(template_path, formatting_info=True)
+                wb = copy(rb)
 
-            sheet2.fit_num_pages = 1
-            sheet2.fit_width_to_pages = 1
-            sheet2.fit_height_to_pages = 1
+                sheet1 = wb.get_sheet(0)
+                sheet1.write(2, 1, user_name)  # B3
+                sheet1.write(2, 3, user_dept)  # E3
 
-            today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
-            write_with_style(sheet2, rd_sheet2, wb, 4, 6, today_str)
-            write_with_style(sheet2, rd_sheet2, wb, 6, 2, user_dept)
+                total_parking_and_toll = 0
+                for i, item in enumerate(details):
+                    row = 4 + i
+                    sheet1.write(row, 0, item["date"])  # A
+                    sheet1.write(row, 1, item["location"])  # B
+                    sheet1.write(row, 3, item["km"])  # D
+                    sheet1.write(row, 4, item["parking"])  # E
+                    sheet1.write(row, 5, item["toll"])  # F
+                    sheet1.write(row, 7, item["reason"])  # H
+                    total_parking_and_toll += item["parking"] + item["toll"]
 
-            first_date = details[0]["date"]
-            last_date = details[-1]["date"]
-            write_with_style(
-                sheet2, rd_sheet2, wb, 8, 0, f"{first_date}~{last_date}交通費用"
-            )
-            write_with_style(
-                sheet2, rd_sheet2, wb, 8, 6, total_parking_and_toll
-            )
-            write_with_style(
-                sheet2, rd_sheet2, wb, 16, 6, total_parking_and_toll
-            )
+                sheet2 = wb.get_sheet(1)
+                today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
+                sheet2.write(4, 6, today_str)  # G5
+                sheet2.write(6, 2, user_dept)  # C7
 
-            output_date = datetime.datetime.now().strftime("%Y%m%d")
-            out_filename = f"私車公用補助申請單-{user_name}-{output_date}.xls"
+                first_date = details[0]["date"]
+                last_date = details[-1]["date"]
+                sheet2.write(8, 0, f"{first_date}~{last_date}交通費用")  # A9
 
-            with tempfile.NamedTemporaryFile(
-                delete=False, suffix=".xls"
-            ) as tmp:
-                wb.save(tmp.name)
-                tmp_path = tmp.name
-
-            with open(tmp_path, "rb") as file:
-                st.download_button(
-                    label="📥 點擊下載報銷單 (Excel)",
-                    data=file,
-                    file_name=out_filename,
-                    mime="application/vnd.ms-excel",
+                output_date = datetime.datetime.now().strftime("%Y%m%d")
+                out_filename = (
+                    f"私車公用補助申請單-{user_name}-{output_date}.xls"
                 )
+
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=".xls"
+                ) as tmp:
+                    wb.save(tmp.name)
+                    tmp_path = tmp.name
+
+                with open(tmp_path, "rb") as file:
+                    st.download_button(
+                        label="📥 點擊下載報銷單 (Excel)",
+                        data=file,
+                        file_name=out_filename,
+                        mime="application/vnd.ms-excel",
+                    )
