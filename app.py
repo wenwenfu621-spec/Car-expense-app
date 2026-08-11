@@ -14,7 +14,7 @@ from PIL import Image
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260811-UI-NAV-FIX"
+APP_VERSION = "20260811-CROP-RECEIPT-FIX"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -130,6 +130,41 @@ def set_cell_value(ws, cell_ref, value):
     cell.value = value
 
 
+def crop_and_rotate_receipt_bytes(raw_bytes, box_2d, rotate_deg):
+    """將圖片去背/裁切出收據區域，並自動旋轉扶正"""
+    try:
+        image = Image.open(io.BytesIO(raw_bytes))
+
+        # 1. 根據 Gemini 回傳的範圍 (box_2d: [ymin, xmin, ymax, xmax] 0~1000) 進行裁切
+        if box_2d and isinstance(box_2d, list) and len(box_2d) == 4:
+            w, h = image.size
+            ymin, xmin, ymax, xmax = box_2d
+
+            # 轉為實際像素，邊緣外擴 15 像素避免切到內文
+            left = max(0, int(xmin * w / 1000) - 15)
+            top = max(0, int(ymin * h / 1000) - 15)
+            right = min(w, int(xmax * w / 1000) + 15)
+            bottom = min(h, int(ymax * h / 1000) + 15)
+
+            if right > left and bottom > top:
+                image = image.crop((left, top, right, bottom))
+
+        # 2. 自動扶正旋轉
+        if rotate_deg in [90, 180, 270]:
+            if rotate_deg == 90:
+                image = image.transpose(Image.ROTATE_270)
+            elif rotate_deg == 180:
+                image = image.transpose(Image.ROTATE_180)
+            elif rotate_deg == 270:
+                image = image.transpose(Image.ROTATE_90)
+
+        out_io = io.BytesIO()
+        image.save(out_io, format="PNG")
+        return out_io.getvalue()
+    except Exception:
+        return raw_bytes
+
+
 def process_images_with_gemini(files, key):
     genai.configure(api_key=key.strip())
 
@@ -153,11 +188,14 @@ def process_images_with_gemini(files, key):
         pass
 
     prompt = """
-    你是一個財務報銷助手。請讀取這份發票/收據，並提取以下資訊：
+    你是一個財務報銷助手。請讀取這份發票/收據照片或文件，並提取以下資訊：
     1. date: 發票日期，格式請統一轉換為 YYYYMMDD（例如 20260603）。若無法取得年份，預設為當前年份。
     2. amount: 停車費金額 (數字)。
+    3. box_2d: 圖片中「收據/發票紙張本體」的範圍座標 [ymin, xmin, ymax, xmax]，數值請以 0 到 1000 之間的整數表示（相對於圖片長寬比例）。若為全頁 PDF 或無法辨識桌背景，請輸出 [0, 0, 1000, 1000]。
+    4. rotate: 將文字扶正所需的順時針旋轉角度，請由 [0, 90, 180, 270] 中選擇一個整數。
     
-    請直接輸出純 JSON 格式，例如：{"date": "20260603", "amount": 150}
+    請直接輸出純 JSON 格式，例如：
+    {"date": "20260603", "amount": 150, "box_2d": [200, 300, 800, 700], "rotate": 0}
     注意：絕對不要加上 ```json 或任何 markdown 標記。
     """
 
@@ -191,7 +229,19 @@ def process_images_with_gemini(files, key):
                 )
 
                 res_json = json.loads(clean_text)
-                res_json["raw_bytes"] = bytes_data
+
+                box_2d = res_json.get("box_2d", [0, 0, 1000, 1000])
+                rotate_deg = res_json.get("rotate", 0)
+
+                # 若上傳的是圖片，自動進行去背裁切與扶正
+                if file_ext in ["jpg", "jpeg", "png"]:
+                    processed_bytes = crop_and_rotate_receipt_bytes(
+                        bytes_data, box_2d, rotate_deg
+                    )
+                else:
+                    processed_bytes = bytes_data
+
+                res_json["raw_bytes"] = processed_bytes
                 res_json["file_ext"] = file_ext
                 res_json["filename"] = uploaded_file.name
                 results.append(res_json)
@@ -226,63 +276,131 @@ if "parsed_receipts" in st.session_state:
     receipts = st.session_state["parsed_receipts"]
 
     st.subheader("📝 補充填寫報銷明細")
-    same_for_all = st.checkbox(
-        "所有單據的【地點、公里數、回數票、事由】皆相同"
-    )
 
+    # 提供 4 個個別勾選按鈕 (一排橫向排列)
+    chk_col1, chk_col2, chk_col3, chk_col4 = st.columns(4)
+    same_loc = chk_col1.checkbox("所有【地點】相同")
+    same_km = chk_col2.checkbox("所有【公里數】相同")
+    same_toll = chk_col3.checkbox("所有【過路費】相同")
+    same_reason = chk_col4.checkbox("所有【事由】相同")
+
+    global_loc, global_km, global_toll, global_reason = "", 0, 0, ""
+
+    if same_loc or same_km or same_toll or same_reason:
+        st.markdown("**📌 共通欄位填寫**")
+        g_col1, g_col2, g_col3, g_col4 = st.columns(4)
+
+        with g_col1:
+            if same_loc:
+                global_loc = st.text_input(
+                    "地點 (共通)", value="", placeholder="例如：客戶端"
+                )
+        with g_col2:
+            if same_km:
+                global_km = st.number_input(
+                    "公里數 (共通)", value=0, step=1
+                )
+        with g_col3:
+            if same_toll:
+                global_toll = st.number_input(
+                    "回數票/過路費 (共通)", value=0, step=1
+                )
+        with g_col4:
+            if same_reason:
+                global_reason = st.text_input(
+                    "事由 (共通)", value="", placeholder="例如：拜訪客戶"
+                )
+
+    st.markdown("---")
     details = []
-    if same_for_all:
-        col_a, col_b = st.columns(2)
-        with col_a:
-            loc = st.text_input("地點", value="", placeholder="例如：客戶端")
-            km = st.number_input("公里數", value=0, step=1)
-        with col_b:
-            toll = st.number_input("回數票/過路費", value=0, step=1)
-            reason = st.text_input("事由", value="", placeholder="例如：拜訪客戶")
 
-        for r in receipts:
-            details.append(
-                {
-                    "date": format_date_to_excel(r["date"]),
-                    "location": loc,
-                    "km": int(km),
-                    "parking": int(round(float(r["amount"]))),
-                    "toll": int(toll),
-                    "reason": reason,
-                    "raw_bytes": r["raw_bytes"],
-                    "file_ext": r["file_ext"],
-                }
-            )
-    else:
-        for idx, r in enumerate(receipts):
-            formatted_date = format_date_to_excel(r["date"])
-            st.markdown(
-                f"**單據 {idx+1} (日期: {formatted_date} / 金額: {r['amount']}元)**"
-            )
-            col1, col2, col3, col4 = st.columns(4)
+    for idx, r in enumerate(receipts):
+        formatted_date = format_date_to_excel(r["date"])
+        st.markdown(
+            f"**單據 {idx+1} (日期: {formatted_date} / 停車費: {r['amount']}元)**"
+        )
+        c1, c2, c3, c4 = st.columns(4)
 
-            loc = col1.text_input(f"地點 #{idx+1}", value="", placeholder="例如：客戶端", key=f"loc_{idx}")
-            km = col2.number_input(
-                f"公里數 #{idx+1}", value=0, step=1, key=f"km_{idx}"
+        # 地點欄位
+        if same_loc:
+            loc_val = global_loc
+            c1.text_input(
+                f"地點 #{idx+1}",
+                value=global_loc,
+                disabled=True,
+                key=f"dis_loc_{idx}",
             )
-            toll = col3.number_input(
-                f"回數票 #{idx+1}", value=0, step=1, key=f"toll_{idx}"
-            )
-            reason = col4.text_input(f"事由 #{idx+1}", value="", placeholder="例如：拜訪客戶", key=f"reason_{idx}")
-
-            details.append(
-                {
-                    "date": formatted_date,
-                    "location": loc,
-                    "km": int(km),
-                    "parking": int(round(float(r["amount"]))),
-                    "toll": int(toll),
-                    "reason": reason,
-                    "raw_bytes": r["raw_bytes"],
-                    "file_ext": r["file_ext"],
-                }
+        else:
+            loc_val = c1.text_input(
+                f"地點 #{idx+1}",
+                value="",
+                placeholder="例如：客戶端",
+                key=f"loc_{idx}",
             )
 
+        # 公里數欄位
+        if same_km:
+            km_val = int(global_km)
+            c2.number_input(
+                f"公里數 #{idx+1}",
+                value=int(global_km),
+                disabled=True,
+                key=f"dis_km_{idx}",
+            )
+        else:
+            km_val = int(
+                c2.number_input(
+                    f"公里數 #{idx+1}", value=0, step=1, key=f"km_{idx}"
+                )
+            )
+
+        # 回數票/過路費欄位
+        if same_toll:
+            toll_val = int(global_toll)
+            c3.number_input(
+                f"回數票 #{idx+1}",
+                value=int(global_toll),
+                disabled=True,
+                key=f"dis_toll_{idx}",
+            )
+        else:
+            toll_val = int(
+                c3.number_input(
+                    f"回數票 #{idx+1}", value=0, step=1, key=f"toll_{idx}"
+                )
+            )
+
+        # 事由欄位
+        if same_reason:
+            reason_val = global_reason
+            c4.text_input(
+                f"事由 #{idx+1}",
+                value=global_reason,
+                disabled=True,
+                key=f"dis_reason_{idx}",
+            )
+        else:
+            reason_val = c4.text_input(
+                f"事由 #{idx+1}",
+                value="",
+                placeholder="例如：拜訪客戶",
+                key=f"reason_{idx}",
+            )
+
+        details.append(
+            {
+                "date": formatted_date,
+                "location": loc_val,
+                "km": km_val,
+                "parking": int(round(float(r["amount"]))),
+                "toll": toll_val,
+                "reason": reason_val,
+                "raw_bytes": r["raw_bytes"],
+                "file_ext": r["file_ext"],
+            }
+        )
+
+    st.markdown(" ")
     btn_col1, btn_col2 = st.columns(2)
 
     # 產出 Excel
@@ -348,7 +466,7 @@ if "parsed_receipts" in st.session_state:
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     )
 
-    # 產出 Word 報支單據憑證檔 (標楷體、置中、一頁一張、防跨頁拆分)
+    # 產出 Word 報支單據憑證檔 (標楷體、置中、一頁一張、自動去背裁切)
     with btn_col2:
         if st.button("📄 產出 Word 報支單據檔"):
             doc = Document()
