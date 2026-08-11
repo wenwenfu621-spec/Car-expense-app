@@ -14,7 +14,7 @@ from PIL import Image
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260811-WORD-LAYOUT-FIX"
+APP_VERSION = "20260811-UI-NAV-FIX"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -24,7 +24,7 @@ st.caption(f"📌 程式版本：`{APP_VERSION}`")
 
 
 # 注入 JavaScript：處理按 Enter 自動跳下一欄位與游標閃爍 Focus
-def inject_auto_focus_js():
+def inject_enter_focus_js():
     js_code = """
     <script>
     function setupEnterNavigation() {
@@ -77,7 +77,7 @@ st.markdown(
     "上傳停車發票/收據照片或 **PDF 檔**，由 Gemini AI 自動辨識日期與金額，輕鬆生成報銷單！"
 )
 
-# 2. API Key 設定 (分割字串避免 GitHub Secret Scanning 阻擋)
+# 2. API Key 設定 (自動帶入預設金鑰，分割字串避免 GitHub Secret Scanning 阻擋)
 KEY_PART1 = "AQ.Ab8RN6JNdZJgY7a7BDK67Cx"
 KEY_PART2 = "W44rm-vd-bHVwIkaCS84ZPG9yww"
 DEFAULT_API_KEY = KEY_PART1 + KEY_PART2
@@ -92,12 +92,12 @@ if not api_key:
     st.warning("⚠️ 請先輸入 Gemini API Key 才能開始使用。")
     st.stop()
 
-# 3. 基本資料填寫
+# 3. 基本資料填寫 (預設全為空字串，以 placeholder 提供填寫提示)
 col1, col2 = st.columns(2)
 with col1:
-    user_name = st.text_input("姓名", placeholder="例如：王大明")
+    user_name = st.text_input("姓名", value="", placeholder="例如：王大明")
 with col2:
-    user_dept = st.text_input("部門", placeholder="例如：研發部")
+    user_dept = st.text_input("部門", value="", placeholder="例如：研發部")
 
 # 4. 上傳檔案
 uploaded_files = st.file_uploader(
@@ -234,11 +234,11 @@ if "parsed_receipts" in st.session_state:
     if same_for_all:
         col_a, col_b = st.columns(2)
         with col_a:
-            loc = st.text_input("地點", value="客戶端")
+            loc = st.text_input("地點", value="", placeholder="例如：客戶端")
             km = st.number_input("公里數", value=0, step=1)
         with col_b:
             toll = st.number_input("回數票/過路費", value=0, step=1)
-            reason = st.text_input("事由", value="拜訪客戶")
+            reason = st.text_input("事由", value="", placeholder="例如：拜訪客戶")
 
         for r in receipts:
             details.append(
@@ -261,14 +261,14 @@ if "parsed_receipts" in st.session_state:
             )
             col1, col2, col3, col4 = st.columns(4)
 
-            loc = col1.text_input(f"地點 #{idx+1}", key=f"loc_{idx}")
+            loc = col1.text_input(f"地點 #{idx+1}", value="", placeholder="例如：客戶端", key=f"loc_{idx}")
             km = col2.number_input(
                 f"公里數 #{idx+1}", value=0, step=1, key=f"km_{idx}"
             )
             toll = col3.number_input(
                 f"回數票 #{idx+1}", value=0, step=1, key=f"toll_{idx}"
             )
-            reason = col4.text_input(f"事由 #{idx+1}", key=f"reason_{idx}")
+            reason = col4.text_input(f"事由 #{idx+1}", value="", placeholder="例如：拜訪客戶", key=f"reason_{idx}")
 
             details.append(
                 {
@@ -276,7 +276,7 @@ if "parsed_receipts" in st.session_state:
                     "location": loc,
                     "km": int(km),
                     "parking": int(round(float(r["amount"]))),
-                    "toll": toll,
+                    "toll": int(toll),
                     "reason": reason,
                     "raw_bytes": r["raw_bytes"],
                     "file_ext": r["file_ext"],
@@ -300,8 +300,8 @@ if "parsed_receipts" in st.session_state:
                 # Sheet 1: 私車公用單
                 ws1 = wb.worksheets[0]
 
-                set_cell_value(ws1, "B3", user_name)  # B3
-                set_cell_value(ws1, "E3", user_dept)  # E3
+                set_cell_value(ws1, "B3", user_name)  # B3 姓名
+                set_cell_value(ws1, "E3", user_dept)  # E3 部門
 
                 for i, item in enumerate(details):
                     row_num = 5 + i
@@ -354,14 +354,13 @@ if "parsed_receipts" in st.session_state:
             doc = Document()
 
             for idx, item in enumerate(details):
-                # 第一張之後，每張單據獨立一頁
                 if idx > 0:
                     doc.add_page_break()
 
                 # 1. 標題段落 (置中 + 標楷體 + 緊接下一段不分頁)
                 p = doc.add_paragraph()
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                p.paragraph_format.keep_with_next = True  # 強制與下方圖片在同一頁
+                p.paragraph_format.keep_with_next = True
 
                 run = p.add_run(f"{item['date']} 停車費")
                 run.font.size = Pt(14)
@@ -378,7 +377,6 @@ if "parsed_receipts" in st.session_state:
 
                 img_stream = None
                 if ext == "pdf":
-                    # 使用 PyMuPDF 將 PDF 第一頁轉成高解析度圖片
                     pdf_doc = fitz.open(stream=raw_bytes, filetype="pdf")
                     if len(pdf_doc) > 0:
                         page = pdf_doc[0]
@@ -411,4 +409,4 @@ if "parsed_receipts" in st.session_state:
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 )
 
-inject_auto_focus_js()
+inject_enter_focus_js()
