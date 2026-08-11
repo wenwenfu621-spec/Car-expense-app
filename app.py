@@ -8,12 +8,15 @@ import streamlit as st
 import xlrd
 from xlutils.copy import copy
 
-st.set_page_config(page_title="私車公用補助單自動化工具", layout="centered")
+# 版本別定義
+APP_VERSION = "20260811-1"
 
+st.set_page_config(page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered")
+
+# 畫面開頭標註版本號
+st.caption(f"📌 程式版本：`{APP_VERSION}`")
 st.title("🚗 私車公用補助單自動化填寫工具")
-st.markdown(
-    "上傳停車發票/收據照片或 **PDF 檔**，由 Gemini AI 自動辨識日期與金額，輕鬆生成報銷單！"
-)
+st.markdown("上傳停車發票/收據照片或 **PDF 檔**，由 Gemini AI 自動辨識日期與金額，輕鬆生成報銷單！")
 
 # 1. API Key 設定
 api_key = st.text_input(
@@ -26,7 +29,8 @@ if not api_key:
     st.warning("⚠️ 請先輸入 Gemini API Key 才能開始使用。")
     st.stop()
 
-client = genai.Client(api_key=api_key)
+# 建立 Gemini Client
+client = genai.Client(api_key=api_key.strip())
 
 # 2. 基本資料填寫
 col1, col2 = st.columns(2)
@@ -43,30 +47,6 @@ uploaded_files = st.file_uploader(
 )
 
 
-def get_best_available_model(client_instance):
-    """動態尋找該 API Key 當前可用且最適合的 Gemini Flash 模型"""
-    candidate_models = [
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash",
-    ]
-    try:
-        # 動態列出目前 API Key 支援的所有模型
-        available = [m.name for m in client_instance.models.list()]
-        for candidate in candidate_models:
-            for avail in available:
-                if candidate in avail:
-                    return avail
-        for avail in available:
-            if "flash" in avail.lower() and "gemini" in avail.lower():
-                return avail
-        if available:
-            return available[0]
-    except Exception:
-        pass
-    return "gemini-2.5-flash"
-
-
 def process_images_with_gemini(files):
     results = []
     prompt = """
@@ -76,9 +56,6 @@ def process_images_with_gemini(files):
     
     請直接輸出 JSON 格式，如：{"date": "20260603", "amount": 150}
     """
-
-    # 取得自動偵測到的最佳模型
-    selected_model = get_best_available_model(client)
 
     for uploaded_file in files:
         bytes_data = uploaded_file.read()
@@ -91,30 +68,17 @@ def process_images_with_gemini(files):
         else:
             mime_type = "image/jpeg"
 
-        # 多重候選模型嘗試清單，確保不漏接
-        models_to_try = [
-            selected_model,
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
-        ]
-
-        seen = set()
-        unique_models = [
-            m for m in models_to_try if not (m in seen or seen.add(m))
-        ]
-
+        # 多模型自動輪詢嘗試 (2.5-flash -> 2.0-flash -> 1.5-flash)
+        models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
         success = False
         last_error = None
 
-        for model_name in unique_models:
+        for model_name in models_to_try:
             try:
                 response = client.models.generate_content(
                     model=model_name,
                     contents=[
-                        types.Part.from_bytes(
-                            data=bytes_data, mime_type=mime_type
-                        ),
+                        types.Part.from_bytes(data=bytes_data, mime_type=mime_type),
                         prompt,
                     ],
                     config=types.GenerateContentConfig(
@@ -130,12 +94,11 @@ def process_images_with_gemini(files):
                 continue
 
         if not success:
-            st.error(
-                f"❌ 解析檔案 『{uploaded_file.name}』 時失敗：{last_error}"
-            )
-            st.warning(
-                "💡 **若持續失敗，請檢查 API Key 來源**：\n"
-                "建議前往 [Google AI Studio (aistudio.google.com)](https://aistudio.google.com/) 重新建立一組免費 Key 即可順利解決！"
+            st.error(f"❌ 解析檔案 『{uploaded_file.name}』 時失敗：{last_error}")
+            st.info(
+                "💡 **若持續出現 404 NOT_FOUND 錯誤**：\n"
+                "代表該 API Key 所屬的 Google GCP 專案未啟用 『Generative Language API』。\n"
+                "請前往 [Google AI Studio (aistudio.google.com/app/apikey)](https://aistudio.google.com/app/apikey) 點擊 **Create API key in new project** (在新專案建立 API Key) 即可修復！"
             )
             st.stop()
 
@@ -146,21 +109,15 @@ def process_images_with_gemini(files):
 if uploaded_files and user_name and user_dept:
     if st.button("🤖 AI 辨識單據內容"):
         with st.spinner("Gemini 分析照片/PDF 中..."):
-            st.session_state["parsed_receipts"] = process_images_with_gemini(
-                uploaded_files
-            )
-        st.success(
-            f"成功辨識 {len(st.session_state['parsed_receipts'])} 筆單據資料！"
-        )
+            st.session_state["parsed_receipts"] = process_images_with_gemini(uploaded_files)
+        st.success(f"成功辨識 {len(st.session_state['parsed_receipts'])} 筆單據資料！")
 
 # 4. 補充欄位填寫與產出
 if "parsed_receipts" in st.session_state:
     receipts = st.session_state["parsed_receipts"]
 
     st.subheader("📝 補充填寫報銷明細")
-    same_for_all = st.checkbox(
-        "所有單據的【地點、公里數、回數票、事由】皆相同"
-    )
+    same_for_all = st.checkbox("所有單據的【地點、公里數、回數票、事由】皆相同")
 
     details = []
     if same_for_all:
@@ -173,41 +130,31 @@ if "parsed_receipts" in st.session_state:
             reason = st.text_input("事由", value="拜訪客戶")
 
         for r in receipts:
-            details.append(
-                {
-                    "date": r["date"],
-                    "location": loc,
-                    "km": km,
-                    "parking": float(r["amount"]),
-                    "toll": toll,
-                    "reason": reason,
-                }
-            )
+            details.append({
+                "date": r["date"],
+                "location": loc,
+                "km": km,
+                "parking": float(r["amount"]),
+                "toll": toll,
+                "reason": reason,
+            })
     else:
         for idx, r in enumerate(receipts):
-            st.markdown(
-                f"**單據 {idx+1} (日期: {r['date']} / 金額: {r['amount']}元)**"
-            )
+            st.markdown(f"**單據 {idx+1} (日期: {r['date']} / 金額: {r['amount']}元)**")
             col1, col2, col3, col4 = st.columns(4)
             loc = col1.text_input(f"地點 #{idx+1}", key=f"loc_{idx}")
-            km = col2.number_input(
-                f"公里數 #{idx+1}", value=0.0, key=f"km_{idx}"
-            )
-            toll = col3.number_input(
-                f"回數票 #{idx+1}", value=0.0, key=f"toll_{idx}"
-            )
+            km = col2.number_input(f"公里數 #{idx+1}", value=0.0, key=f"km_{idx}")
+            toll = col3.number_input(f"回數票 #{idx+1}", value=0.0, key=f"toll_{idx}")
             reason = col4.text_input(f"事由 #{idx+1}", key=f"reason_{idx}")
 
-            details.append(
-                {
-                    "date": r["date"],
-                    "location": loc,
-                    "km": km,
-                    "parking": float(r["amount"]),
-                    "toll": toll,
-                    "reason": reason,
-                }
-            )
+            details.append({
+                "date": r["date"],
+                "location": loc,
+                "km": km,
+                "parking": float(r["amount"]),
+                "toll": toll,
+                "reason": reason,
+            })
 
     if st.button("🚀 產出 Excel 報銷檔案"):
         template_path = "私車公用補助申請單.xls"
@@ -250,9 +197,7 @@ if "parsed_receipts" in st.session_state:
             output_date = datetime.datetime.now().strftime("%Y%m%d")
             out_filename = f"私車公用補助申請單-{user_name}-{output_date}.xls"
 
-            with tempfile.NamedTemporaryFile(
-                delete=False, suffix=".xls"
-            ) as tmp:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".xls") as tmp:
                 wb.save(tmp.name)
                 tmp_path = tmp.name
 
