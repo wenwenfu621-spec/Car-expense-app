@@ -7,7 +7,7 @@ import streamlit as st
 import xlrd
 from xlutils.copy import copy
 
-APP_VERSION = "20260811-ULTIMATE"
+APP_VERSION = "20260811-LAYOUT-FIX"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -45,10 +45,17 @@ uploaded_files = st.file_uploader(
 )
 
 
+def format_date_to_excel(d_str):
+    """將 YYYYMMDD 純數字格式化為標準日期 YYYY/MM/DD"""
+    d_str = str(d_str).strip()
+    if len(d_str) == 8 and d_str.isdigit():
+        return f"{d_str[:4]}/{d_str[4:6]}/{d_str[6:]}"
+    return d_str
+
+
 def process_images_with_gemini(files, key):
     genai.configure(api_key=key.strip())
 
-    # 候選模型清單 (包含標準名稱與帶前綴名稱)
     candidate_models = [
         "gemini-1.5-flash",
         "gemini-1.5-pro",
@@ -56,7 +63,6 @@ def process_images_with_gemini(files, key):
         "gemini-2.5-flash",
     ]
 
-    # 試圖從帳號動態取得可用模型名稱補補強
     try:
         available = [
             m.name.replace("models/", "")
@@ -95,13 +101,11 @@ def process_images_with_gemini(files, key):
         success = False
         last_error = ""
 
-        # 逐一嘗試候選模型，確保一定能命中一個支援的端點
         for model_name in candidate_models:
             try:
                 model = genai.GenerativeModel(model_name)
                 response = model.generate_content([prompt, content_part])
 
-                # 清理回傳內容
                 raw_text = response.text.strip()
                 clean_text = (
                     raw_text.replace("```json", "")
@@ -119,7 +123,7 @@ def process_images_with_gemini(files, key):
 
         if not success:
             st.error(
-                f"❌ 解析檔案 『{uploaded_file.name}』 失敗，錯誤細節：{last_error}"
+                f"❌ 解析檔案 『{uploaded_file.name}』 失敗：{last_error}"
             )
             st.stop()
 
@@ -159,7 +163,7 @@ if "parsed_receipts" in st.session_state:
         for r in receipts:
             details.append(
                 {
-                    "date": r["date"],
+                    "date": format_date_to_excel(r["date"]),
                     "location": loc,
                     "km": km,
                     "parking": float(r["amount"]),
@@ -169,8 +173,9 @@ if "parsed_receipts" in st.session_state:
             )
     else:
         for idx, r in enumerate(receipts):
+            formatted_date = format_date_to_excel(r["date"])
             st.markdown(
-                f"**單據 {idx+1} (日期: {r['date']} / 金額: {r['amount']}元)**"
+                f"**單據 {idx+1} (日期: {formatted_date} / 金額: {r['amount']}元)**"
             )
             col1, col2, col3, col4 = st.columns(4)
             loc = col1.text_input(f"地點 #{idx+1}", key=f"loc_{idx}")
@@ -184,7 +189,7 @@ if "parsed_receipts" in st.session_state:
 
             details.append(
                 {
-                    "date": r["date"],
+                    "date": formatted_date,
                     "location": loc,
                     "km": km,
                     "parking": float(r["amount"]),
@@ -202,33 +207,42 @@ if "parsed_receipts" in st.session_state:
             rb = xlrd.open_workbook(template_path, formatting_info=True)
             wb = copy(rb)
 
+            # Sheet 1 & Sheet 2: 強制鎖定 A4 紙張與單頁寬度自適應
+            for s_idx in range(len(rb.sheets())):
+                wt_sheet = wb.get_sheet(s_idx)
+                wt_sheet.paper_size_code = 9  # 9 代表 A4 規格
+                wt_sheet.fit_num_pages = 1  # 強制自適應 1 頁
+                wt_sheet.fit_width_to_pages = 1  # 寬度符合 1 頁
+                wt_sheet.fit_height_to_pages = 1  # 高度符合 1 頁
+                wt_sheet.set_fit_to_pages(True)  # 啟用頁面自適應
+
             # Sheet 1: 私車公用單
             sheet1 = wb.get_sheet(0)
-            sheet1.write(2, 1, user_name)
-            sheet1.write(2, 3, user_dept)
+            sheet1.write(2, 1, user_name)  # B3 姓名
+            sheet1.write(2, 3, user_dept)  # E3 部門
 
             total_parking_and_toll = 0
             for i, item in enumerate(details):
                 row = 4 + i
-                sheet1.write(row, 0, item["date"])
-                sheet1.write(row, 1, item["location"])
-                sheet1.write(row, 3, item["km"])
-                sheet1.write(row, 4, item["parking"])
-                sheet1.write(row, 5, item["toll"])
-                sheet1.write(row, 7, item["reason"])
+                sheet1.write(row, 0, item["date"])  # A 日期 (2026/06/04)
+                sheet1.write(row, 1, item["location"])  # B 地點
+                sheet1.write(row, 3, item["km"])  # D 公里數
+                sheet1.write(row, 4, item["parking"])  # E 停車費
+                sheet1.write(row, 5, item["toll"])  # F 回數票
+                sheet1.write(row, 7, item["reason"])  # H 事由
                 total_parking_and_toll += item["parking"] + item["toll"]
 
             # Sheet 2: 支出憑單
             sheet2 = wb.get_sheet(1)
             today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
-            sheet2.write(4, 6, today_str)
-            sheet2.write(6, 2, user_dept)
+            sheet2.write(4, 6, today_str)  # G5 日期
+            sheet2.write(6, 2, user_dept)  # C7 部門/專案編號
 
             first_date = details[0]["date"]
             last_date = details[-1]["date"]
-            sheet2.write(8, 0, f"{first_date}~{last_date}交通費用")
-            sheet2.write(8, 6, total_parking_and_toll)
-            sheet2.write(16, 6, total_parking_and_toll)
+            sheet2.write(8, 0, f"{first_date}~{last_date}交通費用")  # A9 日期區間
+            sheet2.write(8, 6, total_parking_and_toll)  # G9 金額
+            sheet2.write(16, 6, total_parking_and_toll)  # G17 小計
 
             output_date = datetime.datetime.now().strftime("%Y%m%d")
             out_filename = f"私車公用補助申請單-{user_name}-{output_date}.xls"
