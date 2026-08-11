@@ -9,11 +9,10 @@ import xlrd
 from xlutils.copy import copy
 
 # 版本別定義
-APP_VERSION = "20260811-1"
+APP_VERSION = "20260811-2"
 
 st.set_page_config(page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered")
 
-# 畫面開頭標註版本號
 st.caption(f"📌 程式版本：`{APP_VERSION}`")
 st.title("🚗 私車公用補助單自動化填寫工具")
 st.markdown("上傳停車發票/收據照片或 **PDF 檔**，由 Gemini AI 自動辨識日期與金額，輕鬆生成報銷單！")
@@ -29,8 +28,12 @@ if not api_key:
     st.warning("⚠️ 請先輸入 Gemini API Key 才能開始使用。")
     st.stop()
 
-# 建立 Gemini Client
-client = genai.Client(api_key=api_key.strip())
+# 建立 Client
+try:
+    client = genai.Client(api_key=api_key.strip())
+except Exception as e:
+    st.error(f"❌ API Key 初始化失敗：{e}")
+    st.stop()
 
 # 2. 基本資料填寫
 col1, col2 = st.columns(2)
@@ -46,6 +49,18 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True,
 )
 
+def get_working_model(client_obj):
+    """取得此 API Key 權限下第一個可用的模型"""
+    try:
+        models_list = [m.name for m in client_obj.models.list()]
+        for m in models_list:
+            if "flash" in m.lower():
+                return m.replace("models/", "")
+        if models_list:
+            return models_list[0].replace("models/", "")
+    except Exception:
+        pass
+    return None
 
 def process_images_with_gemini(files):
     results = []
@@ -56,6 +71,16 @@ def process_images_with_gemini(files):
     
     請直接輸出 JSON 格式，如：{"date": "20260603", "amount": 150}
     """
+
+    # 動態嘗試可用的模型
+    detected_model = get_working_model(client)
+    models_to_try = []
+    if detected_model:
+        models_to_try.append(detected_model)
+    
+    for fallback in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]:
+        if fallback not in models_to_try:
+            models_to_try.append(fallback)
 
     for uploaded_file in files:
         bytes_data = uploaded_file.read()
@@ -68,8 +93,6 @@ def process_images_with_gemini(files):
         else:
             mime_type = "image/jpeg"
 
-        # 多模型自動輪詢嘗試 (2.5-flash -> 2.0-flash -> 1.5-flash)
-        models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
         success = False
         last_error = None
 
@@ -95,16 +118,20 @@ def process_images_with_gemini(files):
 
         if not success:
             st.error(f"❌ 解析檔案 『{uploaded_file.name}』 時失敗：{last_error}")
-            st.info(
-                "💡 **若持續出現 404 NOT_FOUND 錯誤**：\n"
-                "代表該 API Key 所屬的 Google GCP 專案未啟用 『Generative Language API』。\n"
-                "請前往 [Google AI Studio (aistudio.google.com/app/apikey)](https://aistudio.google.com/app/apikey) 點擊 **Create API key in new project** (在新專案建立 API Key) 即可修復！"
-            )
+            st.error("🚨 **系統診斷：請重新申辦正確開通權限的 Key**")
+            st.markdown("""
+            這個錯誤是因為您目前的 API Key 綁定到了沒有啟用 API 服務的專案。
+            
+            **請點擊下面連結 30 秒重新申辦即可：**
+            1. 前往 **[Google AI Studio 密碼頁面](https://aistudio.google.com/app/apikey)**。
+            2. 點擊藍色按鈕 **`Create API key`**。
+            3. **最重要的步驟**：在選單中**務必選擇 `Create API key in new project`（在新專案建立 API 金鑰）**！
+            4. 複製產生的新 Key 貼回本頁面即可正常使用！
+            """)
             st.stop()
 
     results.sort(key=lambda x: x["date"])
     return results
-
 
 if uploaded_files and user_name and user_dept:
     if st.button("🤖 AI 辨識單據內容"):
