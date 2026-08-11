@@ -7,7 +7,7 @@ import streamlit as st
 import xlrd
 from xlutils.copy import copy
 
-APP_VERSION = "20260811-STABLE"
+APP_VERSION = "20260811-ULTIMATE"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -47,16 +47,35 @@ uploaded_files = st.file_uploader(
 
 def process_images_with_gemini(files, key):
     genai.configure(api_key=key.strip())
-    # 使用目前通用性最高、最穩定的 gemini-1.5-flash 模型
-    model = genai.GenerativeModel("gemini-1.5-flash")
+
+    # 候選模型清單 (包含標準名稱與帶前綴名稱)
+    candidate_models = [
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+        "gemini-2.0-flash",
+        "gemini-2.5-flash",
+    ]
+
+    # 試圖從帳號動態取得可用模型名稱補補強
+    try:
+        available = [
+            m.name.replace("models/", "")
+            for m in genai.list_models()
+            if "generateContent" in m.supported_generation_methods
+        ]
+        for a in available:
+            if a not in candidate_models:
+                candidate_models.insert(0, a)
+    except Exception:
+        pass
 
     prompt = """
     你是一個財務報銷助手。請讀取這份發票/收據，並提取以下資訊：
     1. date: 發票日期，格式請統一轉換為 YYYYMMDD（例如 20260603）。若無法取得年份，預設為當前年份。
     2. amount: 停車費金額 (數字)。
     
-    請直接輸出 JSON 格式，如：{"date": "20260603", "amount": 150}
-    注意：請只輸出純 JSON 文字，不要加上 markdown 的 ```json 標籤。
+    請直接輸出純 JSON 格式，例如：{"date": "20260603", "amount": 150}
+    注意：絕對不要加上 ```json 或任何 markdown 標記。
     """
 
     results = []
@@ -73,18 +92,34 @@ def process_images_with_gemini(files, key):
 
         content_part = {"mime_type": mime_type, "data": bytes_data}
 
-        try:
-            response = model.generate_content([prompt, content_part])
-            clean_text = (
-                response.text.replace("```json", "")
-                .replace("```", "")
-                .strip()
-            )
-            res_json = json.loads(clean_text)
-            results.append(res_json)
-        except Exception as e:
+        success = False
+        last_error = ""
+
+        # 逐一嘗試候選模型，確保一定能命中一個支援的端點
+        for model_name in candidate_models:
+            try:
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content([prompt, content_part])
+
+                # 清理回傳內容
+                raw_text = response.text.strip()
+                clean_text = (
+                    raw_text.replace("```json", "")
+                    .replace("```", "")
+                    .strip()
+                )
+
+                res_json = json.loads(clean_text)
+                results.append(res_json)
+                success = True
+                break
+            except Exception as e:
+                last_error = str(e)
+                continue
+
+        if not success:
             st.error(
-                f"❌ 解析檔案 『{uploaded_file.name}』 時失敗：{e}"
+                f"❌ 解析檔案 『{uploaded_file.name}』 失敗，錯誤細節：{last_error}"
             )
             st.stop()
 
