@@ -6,7 +6,7 @@ import google.generativeai as genai
 import openpyxl
 import streamlit as st
 
-APP_VERSION = "20260811-BYPASS-SCAN"
+APP_VERSION = "20260811-FOCUS-PARAM-FIX"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -178,7 +178,7 @@ if "parsed_receipts" in st.session_state:
     if same_for_all:
         col_a, col_b = st.columns(2)
         with col_a:
-            loc = st.text_input("地點", value="客戶端", focus=True)
+            loc = st.text_input("地點", value="客戶端")
             km = st.number_input("公里數", value=0, step=1)
         with col_b:
             toll = st.number_input("回數票/過路費", value=0, step=1)
@@ -203,13 +203,7 @@ if "parsed_receipts" in st.session_state:
             )
             col1, col2, col3, col4 = st.columns(4)
 
-            if idx == 0:
-                loc = col1.text_input(
-                    f"地點 #{idx+1}", key=f"loc_{idx}", focus=True
-                )
-            else:
-                loc = col1.text_input(f"地點 #{idx+1}", key=f"loc_{idx}")
-
+            loc = col1.text_input(f"地點 #{idx+1}", key=f"loc_{idx}")
             km = col2.number_input(
                 f"公里數 #{idx+1}", value=0, step=1, key=f"km_{idx}"
             )
