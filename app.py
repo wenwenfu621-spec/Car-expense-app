@@ -5,14 +5,64 @@ import tempfile
 import google.generativeai as genai
 import openpyxl
 import streamlit as st
+import streamlit.components.v1 as components
 
-APP_VERSION = "20260811-FOCUS-PARAM-FIX"
+APP_VERSION = "20260811-ENTER-FOCUS-UI"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
 )
 
 st.caption(f"📌 程式版本：`{APP_VERSION}`")
+
+
+# 注入 JavaScript：處理按 Enter 自動跳下一欄位與游標閃爍 Focus
+def inject_auto_focus_js():
+    js_code = """
+    <script>
+    function setupEnterNavigation() {
+        const doc = window.parent.document;
+        // 抓取頁面上所有的輸入欄位 (文字與數字輸入框)
+        const inputs = Array.from(doc.querySelectorAll('input[type="text"], input[type="number"]'));
+        
+        inputs.forEach((input, index) => {
+            if (!input.dataset.enterBound) {
+                input.dataset.enterBound = "true";
+                input.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        // 延遲一點點時間等待 Streamlit 觸發資料更新，隨即跳至下個欄位
+                        setTimeout(() => {
+                            const updatedInputs = Array.from(doc.querySelectorAll('input[type="text"], input[type="number"]'));
+                            const nextInput = updatedInputs[index + 1];
+                            if (nextInput) {
+                                nextInput.focus();
+                                if (typeof nextInput.select === 'function') {
+                                    nextInput.select();
+                                }
+                            }
+                        }, 150);
+                    }
+                });
+            }
+        });
+
+        // 若當前沒有 focus 的輸入框，自動定位到第一個未填寫的欄位
+        const active = doc.activeElement;
+        if (!active || active.tagName !== 'INPUT') {
+            const emptyInput = inputs.find(i => i.value.trim() === '');
+            if (emptyInput) {
+                emptyInput.focus();
+            }
+        }
+    }
+    
+    // 頁面渲染完畢後執行自動聚焦腳本
+    setTimeout(setupEnterNavigation, 300);
+    setTimeout(setupEnterNavigation, 800);
+    </script>
+    """
+    components.html(js_code, height=0, width=0)
+
 
 # 1. 網頁標題 (自訂 CSS 樣式，確保單一行顯示不折行)
 st.markdown(
@@ -273,3 +323,6 @@ if "parsed_receipts" in st.session_state:
                     file_name=out_filename,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
+
+# 在頁面底部注入自動聚焦與 Enter 跳欄位腳本
+inject_auto_focus_js()
