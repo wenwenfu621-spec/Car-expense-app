@@ -1,4 +1,4 @@
-# 📌 程式版本：20260811-SINGLE-PAGE-EXIF-FIX
+# 📌 程式版本：20260811-AUTO-SCALE-NAV-FIX
 streamlit
 google-generativeai
 openpyxl
