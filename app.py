@@ -1,13 +1,18 @@
 import datetime
+import io
 import json
 import os
 import tempfile
+import fitz  # PyMuPDF
 import google.generativeai as genai
 import openpyxl
+from docx import Document
+from docx.shared import Inches, Pt
+from PIL import Image
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260811-TITLE-CENTER-FIX"
+APP_VERSION = "20260811-WORD-EXPORT-FIX"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -70,7 +75,7 @@ st.markdown(
     "上傳停車發票/收據照片或 **PDF 檔**，由 Gemini AI 自動辨識日期與金額，輕鬆生成報銷單！"
 )
 
-# 2. API Key 設定 (分割字串避免 GitHub Secret Scanning 阻擋)
+# 2. API Key 設定
 KEY_PART1 = "AQ.Ab8RN6JNdZJgY7a7BDK67Cx"
 KEY_PART2 = "W44rm-vd-bHVwIkaCS84ZPG9yww"
 DEFAULT_API_KEY = KEY_PART1 + KEY_PART2
@@ -184,6 +189,9 @@ def process_images_with_gemini(files, key):
                 )
 
                 res_json = json.loads(clean_text)
+                res_json["raw_bytes"] = bytes_data
+                res_json["file_ext"] = file_ext
+                res_json["filename"] = uploaded_file.name
                 results.append(res_json)
                 success = True
                 break
@@ -211,7 +219,7 @@ if uploaded_files and user_name and user_dept:
             f"成功辨識 {len(st.session_state['parsed_receipts'])} 筆單據資料！"
         )
 
-# 5. 補充欄位與匯出 Excel
+# 5. 補充欄位與匯出 Excel / Word
 if "parsed_receipts" in st.session_state:
     receipts = st.session_state["parsed_receipts"]
 
@@ -239,6 +247,8 @@ if "parsed_receipts" in st.session_state:
                     "parking": int(round(float(r["amount"]))),
                     "toll": int(toll),
                     "reason": reason,
+                    "raw_bytes": r["raw_bytes"],
+                    "file_ext": r["file_ext"],
                 }
             )
     else:
@@ -266,69 +276,128 @@ if "parsed_receipts" in st.session_state:
                     "parking": int(round(float(r["amount"]))),
                     "toll": int(toll),
                     "reason": reason,
+                    "raw_bytes": r["raw_bytes"],
+                    "file_ext": r["file_ext"],
                 }
             )
 
-    if st.button("🚀 產出 Excel 報銷檔案"):
-        template_xlsx = "私車公用補助申請單.xlsx"
+    btn_col1, btn_col2 = st.columns(2)
 
-        if not os.path.exists(template_xlsx):
-            st.error(
-                "系統找不到範本『私車公用補助申請單.xlsx』！請確認檔名是否包含 .xlsx"
-            )
-        else:
-            wb = openpyxl.load_workbook(template_xlsx)
+    # 產出 Excel
+    with btn_col1:
+        if st.button("🚀 產出 Excel 報銷檔案"):
+            template_xlsx = "私車公用補助申請單.xlsx"
 
-            # Sheet 1: 私車公用單
-            ws1 = wb.worksheets[0]
+            if not os.path.exists(template_xlsx):
+                st.error(
+                    "系統找不到範本『私車公用補助申請單.xlsx』！請確認檔名是否包含 .xlsx"
+                )
+            else:
+                wb = openpyxl.load_workbook(template_xlsx)
 
-            set_cell_value(ws1, "B3", user_name)
-            set_cell_value(ws1, "E3", user_dept)
+                # Sheet 1: 私車公用單
+                ws1 = wb.worksheets[0]
 
-            for i, item in enumerate(details):
-                row_num = 5 + i
-                set_cell_value(ws1, (row_num, 1), item["date"])  # A 欄 日期
-                set_cell_value(ws1, (row_num, 2), item["location"])  # B 欄 地點
-                set_cell_value(ws1, (row_num, 4), item["km"])  # D 欄 公里數
-                set_cell_value(ws1, (row_num, 5), item["parking"])  # E 欄 停車費
-                set_cell_value(ws1, (row_num, 6), item["toll"])  # F 欄 回數票
-                set_cell_value(ws1, (row_num, 8), item["reason"])  # H 欄 事由
+                set_cell_value(ws1, "B3", user_name)  # B3
+                set_cell_value(ws1, "E3", user_dept)  # E3
 
-            # Sheet 2: 支出憑單
-            ws2 = wb.worksheets[1]
-            today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
+                for i, item in enumerate(details):
+                    row_num = 5 + i
+                    set_cell_value(ws1, (row_num, 1), item["date"])  # A 欄 日期
+                    set_cell_value(ws1, (row_num, 2), item["location"])  # B 欄 地點
+                    set_cell_value(ws1, (row_num, 4), item["km"])  # D 欄 公里數
+                    set_cell_value(ws1, (row_num, 5), item["parking"])  # E 欄 停車費
+                    set_cell_value(ws1, (row_num, 6), item["toll"])  # F 欄 回數票
+                    set_cell_value(ws1, (row_num, 8), item["reason"])  # H 欄 事由
 
-            set_cell_value(ws2, "G5", today_str)  # G5 日期
-            set_cell_value(ws2, "C7", user_dept)  # C7 部門
+                # Sheet 2: 支出憑單
+                ws2 = wb.worksheets[1]
+                today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
 
-            first_date = details[0]["date"]
-            last_date = details[-1]["date"]
-            set_cell_value(ws2, "A9", f"{first_date}~{last_date}交通費用")
+                set_cell_value(ws2, "G5", today_str)  # G5 日期
+                set_cell_value(ws2, "C7", user_dept)  # C7 部門
 
-            # 計算私車公用總金額 (公里數*6 + 停車費 + 回數票)
-            tot_km = sum(item["km"] for item in details)
-            tot_parking = sum(item["parking"] for item in details)
-            tot_toll = sum(item["toll"] for item in details)
-            grand_total = (tot_km * 6) + tot_parking + tot_toll
+                first_date = details[0]["date"]
+                last_date = details[-1]["date"]
+                set_cell_value(ws2, "A9", f"{first_date}~{last_date}交通費用")
 
-            # 自動帶入支出憑單的「金額 (G9)」與「小計 (G17)」
-            set_cell_value(ws2, "G9", grand_total)   # G9 金額
-            set_cell_value(ws2, "G17", grand_total)  # G17 小計
+                tot_km = sum(item["km"] for item in details)
+                tot_parking = sum(item["parking"] for item in details)
+                tot_toll = sum(item["toll"] for item in details)
+                grand_total = (tot_km * 6) + tot_parking + tot_toll
+
+                set_cell_value(ws2, "G9", grand_total)
+                set_cell_value(ws2, "G17", grand_total)
+
+                output_date = datetime.datetime.now().strftime("%Y%m%d")
+                out_filename = f"私車公用補助申請單-{user_name}-{output_date}.xlsx"
+
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=".xlsx"
+                ) as tmp:
+                    wb.save(tmp.name)
+                    tmp_path = tmp.name
+
+                with open(tmp_path, "rb") as file:
+                    st.download_button(
+                        label="📥 下載報銷單 (Excel)",
+                        data=file,
+                        file_name=out_filename,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+
+    # 產出 Word 報支單據憑證檔
+    with btn_col2:
+        if st.button("📄 產出 Word 報支單據檔"):
+            doc = Document()
+
+            for item in details:
+                # 1. 寫入單據上方標題：日期 停車費 (例如：2026/08/05 停車費)
+                p = doc.add_paragraph()
+                run = p.add_run(f"{item['date']} 停車費")
+                run.font.size = Pt(14)
+                run.font.bold = True
+
+                # 2. 處理圖片/PDF 轉 Image 寫入 Word
+                raw_bytes = item["raw_bytes"]
+                ext = item["file_ext"]
+
+                img_stream = None
+                if ext == "pdf":
+                    # 使用 PyMuPDF 將 PDF 第一頁渲染為圖片
+                    pdf_doc = fitz.open(stream=raw_bytes, filetype="pdf")
+                    if len(pdf_doc) > 0:
+                        page = pdf_doc[0]
+                        pix = page.get_pixmap(dpi=200)
+                        img_stream = io.BytesIO(pix.tobytes("png"))
+                else:
+                    img_stream = io.BytesIO(raw_bytes)
+
+                if img_stream:
+                    try:
+                        # 將圖片插入 Word 並限制最大寬度為 3.5 英吋 (符合單據憑證比例)
+                        doc.add_picture(img_stream, width=Inches(3.5))
+                    except Exception as e:
+                        doc.add_paragraph(f"[圖片載入失敗: {e}]")
+
+                # 加空行分隔
+                doc.add_paragraph()
 
             output_date = datetime.datetime.now().strftime("%Y%m%d")
-            out_filename = f"私車公用補助申請單-{user_name}-{output_date}.xlsx"
+            word_filename = f"報支單據-{user_name}-{output_date}.docx"
 
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-                wb.save(tmp.name)
+            with tempfile.NamedTemporaryFile(
+                delete=False, suffix=".docx"
+            ) as tmp:
+                doc.save(tmp.name)
                 tmp_path = tmp.name
 
             with open(tmp_path, "rb") as file:
                 st.download_button(
-                    label="📥 點擊下載報銷單 (Excel)",
+                    label="📥 下載報支單據 (Word)",
                     data=file,
-                    file_name=out_filename,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    file_name=word_filename,
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 )
 
-# 在頁面底部注入自動聚焦與 Enter 跳欄位腳本
 inject_auto_focus_js()
