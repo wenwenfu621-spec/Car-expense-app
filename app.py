@@ -7,7 +7,7 @@ import openpyxl
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260811-ENTER-FOCUS-UI"
+APP_VERSION = "20260811-EXPENSE-TOTAL-FIX"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -22,7 +22,6 @@ def inject_auto_focus_js():
     <script>
     function setupEnterNavigation() {
         const doc = window.parent.document;
-        // 抓取頁面上所有的輸入欄位 (文字與數字輸入框)
         const inputs = Array.from(doc.querySelectorAll('input[type="text"], input[type="number"]'));
         
         inputs.forEach((input, index) => {
@@ -30,7 +29,6 @@ def inject_auto_focus_js():
                 input.dataset.enterBound = "true";
                 input.addEventListener('keydown', function(e) {
                     if (e.key === 'Enter') {
-                        // 延遲一點點時間等待 Streamlit 觸發資料更新，隨即跳至下個欄位
                         setTimeout(() => {
                             const updatedInputs = Array.from(doc.querySelectorAll('input[type="text"], input[type="number"]'));
                             const nextInput = updatedInputs[index + 1];
@@ -46,7 +44,6 @@ def inject_auto_focus_js():
             }
         });
 
-        // 若當前沒有 focus 的輸入框，自動定位到第一個未填寫的欄位
         const active = doc.activeElement;
         if (!active || active.tagName !== 'INPUT') {
             const emptyInput = inputs.find(i => i.value.trim() === '');
@@ -56,7 +53,6 @@ def inject_auto_focus_js():
         }
     }
     
-    // 頁面渲染完畢後執行自動聚焦腳本
     setTimeout(setupEnterNavigation, 300);
     setTimeout(setupEnterNavigation, 800);
     </script>
@@ -308,6 +304,16 @@ if "parsed_receipts" in st.session_state:
             first_date = details[0]["date"]
             last_date = details[-1]["date"]
             set_cell_value(ws2, "A9", f"{first_date}~{last_date}交通費用")
+
+            # 計算私車公用總金額 (公里數*6 + 停車費 + 回數票)
+            tot_km = sum(item["km"] for item in details)
+            tot_parking = sum(item["parking"] for item in details)
+            tot_toll = sum(item["toll"] for item in details)
+            grand_total = (tot_km * 6) + tot_parking + tot_toll
+
+            # 自動帶入支出憑單的「金額 (G9)」與「小計 (G17)」
+            set_cell_value(ws2, "G9", grand_total)   # G9 金額
+            set_cell_value(ws2, "G17", grand_total)  # G17 小計
 
             output_date = datetime.datetime.now().strftime("%Y%m%d")
             out_filename = f"私車公用補助申請單-{user_name}-{output_date}.xlsx"
