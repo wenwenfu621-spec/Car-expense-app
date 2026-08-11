@@ -13,8 +13,9 @@ from docx.shared import Inches, Pt
 from PIL import Image, ImageOps
 import streamlit as st
 import streamlit.components.v1 as components
+import base64
 
-APP_VERSION = "20260811-AUTO-SCALE-NAV-FIX"
+APP_VERSION = "20260811-DESIGN-BY-MAX-AVATAR"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -40,7 +41,6 @@ def inject_enter_focus_js():
                         if (e.key === 'Enter') {
                             e.preventDefault();
                             
-                            // 即時重新抓取目前頁面上所有【可編輯/未停用】的輸入框
                             const validInputs = Array.from(doc.querySelectorAll('input[type="text"]:not([disabled]), input[type="number"]:not([disabled])'));
                             const currentIndex = validInputs.indexOf(this);
                             
@@ -60,7 +60,6 @@ def inject_enter_focus_js():
         }
 
         attachListeners();
-        // 應對 Streamlit 動態渲染，間隔觸發綁定
         setInterval(attachListeners, 1000);
     }
     
@@ -68,6 +67,52 @@ def inject_enter_focus_js():
     </script>
     """
     components.html(js_code, height=0, width=0)
+
+
+# 注入右下角個人專屬署名 (Design by Max + Q版頭像)
+def inject_custom_footer():
+    avatar_path = "avatar.png"
+    img_base64 = ""
+    
+    if os.path.exists(avatar_path):
+        with open(avatar_path, "rb") as img_f:
+            img_base64 = base64.b64encode(img_f.read()).decode("utf-8")
+            
+    avatar_html = (
+        f'<img src="data:image/png;base64,{img_base64}" style="width: 36px; height: 36px; border-radius: 50%; object-fit: cover; margin-right: 8px; border: 1.5px solid #ccc; background-color: #fff;">'
+        if img_base64 else ''
+    )
+
+    footer_css = f"""
+    <style>
+    .custom-footer-max {{
+        position: fixed;
+        bottom: 12px;
+        right: 110px;
+        display: flex;
+        align-items: center;
+        background-color: rgba(255, 255, 255, 0.92);
+        padding: 4px 12px;
+        border-radius: 20px;
+        box-shadow: 0px 2px 8px rgba(0, 0, 0, 0.12);
+        z-index: 999999;
+        pointer-events: none;
+    }}
+    .custom-footer-text {{
+        font-family: 'Comic Sans MS', cursive, sans-serif;
+        font-weight: bold;
+        font-style: italic;
+        font-size: 0.95rem;
+        color: #333333;
+        white-space: nowrap;
+    }}
+    </style>
+    <div class="custom-footer-max">
+        {avatar_html}
+        <span class="custom-footer-text">Design by Max</span>
+    </div>
+    """
+    st.markdown(footer_css, unsafe_allow_html=True)
 
 
 # 1. 網頁標題 (置中顯示、前後加車子圖示、單一行顯示)
@@ -487,7 +532,6 @@ if "parsed_receipts" in st.session_state:
                 if idx > 0:
                     doc.add_page_break()
 
-                # 將標題與圖片強行綁定在同一段落
                 p = doc.add_paragraph()
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 p.paragraph_format.space_before = Pt(0)
@@ -517,12 +561,10 @@ if "parsed_receipts" in st.session_state:
 
                 if img_stream:
                     try:
-                        # 讀取圖片長寬比，進行智慧防超長等比縮放
                         pil_img = Image.open(img_stream)
                         w, h = pil_img.size
                         aspect_ratio = h / w if w > 0 else 1.0
 
-                        # 基礎設定寬度為 2.2 英吋，若縱橫比過高，限制最大高度為 4.8 英吋
                         target_width = 2.2
                         target_height = target_width * aspect_ratio
 
@@ -530,7 +572,6 @@ if "parsed_receipts" in st.session_state:
                             target_height = 4.8
                             target_width = target_height / aspect_ratio
 
-                        # 重製 stream 指標寫入 Word
                         img_stream.seek(0)
                         run_img = p.add_run()
                         run_img.add_picture(
@@ -557,3 +598,4 @@ if "parsed_receipts" in st.session_state:
                 )
 
 inject_enter_focus_js()
+inject_custom_footer()
