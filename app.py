@@ -1,3 +1,4 @@
+import base64
 import datetime
 import io
 import json
@@ -13,9 +14,8 @@ from docx.shared import Inches, Pt
 from PIL import Image, ImageOps
 import streamlit as st
 import streamlit.components.v1 as components
-import base64
 
-APP_VERSION = "20260811-DESIGN-BY-MAX-AVATAR"
+APP_VERSION = "20260811-AVATAR-JPG-FIX"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -69,18 +69,26 @@ def inject_enter_focus_js():
     components.html(js_code, height=0, width=0)
 
 
-# 注入右下角個人專屬署名 (Design by Max + Q版頭像)
+# 注入右下角個人專屬署名 (Design by Max + 相容 .jpg/.jpeg/.png Q版頭像)
 def inject_custom_footer():
-    avatar_path = "avatar.png"
+    avatar_candidates = ["avatar.jpg", "avatar.jpeg", "avatar.png", "avatar.JPG"]
     img_base64 = ""
-    
-    if os.path.exists(avatar_path):
-        with open(avatar_path, "rb") as img_f:
-            img_base64 = base64.b64encode(img_f.read()).decode("utf-8")
-            
+    mime_type = "image/png"
+
+    for af in avatar_candidates:
+        if os.path.exists(af):
+            with open(af, "rb") as img_f:
+                img_base64 = base64.b64encode(img_f.read()).decode("utf-8")
+                if af.lower().endswith((".jpg", ".jpeg")):
+                    mime_type = "image/jpeg"
+                else:
+                    mime_type = "image/png"
+            break
+
     avatar_html = (
-        f'<img src="data:image/png;base64,{img_base64}" style="width: 36px; height: 36px; border-radius: 50%; object-fit: cover; margin-right: 8px; border: 1.5px solid #ccc; background-color: #fff;">'
-        if img_base64 else ''
+        f'<img src="data:{mime_type};base64,{img_base64}" style="width: 36px; height: 36px; border-radius: 50%; object-fit: cover; margin-right: 8px; border: 1.5px solid #ccc; background-color: #fff;">'
+        if img_base64
+        else ""
     )
 
     footer_css = f"""
