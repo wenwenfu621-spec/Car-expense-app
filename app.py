@@ -6,7 +6,7 @@ import google.generativeai as genai
 import openpyxl
 import streamlit as st
 
-APP_VERSION = "20260811-PERFECT-V2"
+APP_VERSION = "20260811-MERGED-CELL-FIX"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -56,6 +56,22 @@ def format_date_to_excel(d_str):
     if len(d_str) == 8 and d_str.isdigit():
         return f"{d_str[:4]}/{d_str[4:6]}/{d_str[6:]}"
     return d_str
+
+
+def set_cell_value(ws, cell_ref, value):
+    """安全寫入函式：自動相容一般儲存格與合併儲存格 (MergedCell)"""
+    if isinstance(cell_ref, str):
+        cell = ws[cell_ref]
+    else:
+        cell = ws.cell(row=cell_ref[0], column=cell_ref[1])
+
+    if type(cell).__name__ == "MergedCell":
+        # 尋找合併區域，並寫入該區域左上角主儲存格
+        for rng in ws.merged_cells.ranges:
+            if cell.coordinate in rng:
+                ws.cell(row=rng.min_row, column=rng.min_col).value = value
+                return
+    cell.value = value
 
 
 def process_images_with_gemini(files, key):
@@ -217,31 +233,32 @@ if "parsed_receipts" in st.session_state:
             # Sheet 1: 私車公用單
             ws1 = wb.worksheets[0]
 
-            # 填寫抬頭
-            ws1["B3"].value = user_name
-            ws1["E3"].value = user_dept
+            # 安全寫入抬頭
+            set_cell_value(ws1, "B3", user_name)
+            set_cell_value(ws1, "E3", user_dept)
 
-            # 填寫單據明細 (從第 5 列開始填入，絕不上抹除原本邊框)
+            # 安全寫入單據明細 (從第 5 列開始填入，絕不上抹除原本邊框)
             for i, item in enumerate(details):
                 row_num = 5 + i
-                ws1.cell(row=row_num, column=1).value = item["date"]  # A 欄 日期
-                ws1.cell(row=row_num, column=2).value = item["location"]  # B 欄 地點
-                ws1.cell(row=row_num, column=4).value = item["km"]  # D 欄 公里數
-                ws1.cell(row=row_num, column=5).value = item["parking"]  # E 欄 停車費
-                ws1.cell(row=row_num, column=6).value = item["toll"]  # F 欄 回數票
-                ws1.cell(row=row_num, column=8).value = item["reason"]  # H 欄 事由
+                set_cell_value(ws1, (row_num, 1), item["date"])  # A 欄 日期
+                set_cell_value(ws1, (row_num, 2), item["location"])  # B 欄 地點
+                set_cell_value(ws1, (row_num, 4), item["km"])  # D 欄 公里數
+                set_cell_value(ws1, (row_num, 5), item["parking"])  # E 欄 停車費
+                set_cell_value(ws1, (row_num, 6), item["toll"])  # F 欄 回數票
+                set_cell_value(ws1, (row_num, 8), item["reason"])  # H 欄 事由
 
             # 提醒：第 27 列與 28 列維持原範本公式，程式不做任何複寫！
 
             # Sheet 2: 支出憑單
             ws2 = wb.worksheets[1]
             today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
-            ws2["G5"].value = today_str  # G5 日期
-            ws2["C7"].value = user_dept  # C7 部門
+
+            set_cell_value(ws2, "G5", today_str)  # G5 日期
+            set_cell_value(ws2, "C7", user_dept)  # C7 部門
 
             first_date = details[0]["date"]
             last_date = details[-1]["date"]
-            ws2["A9"].value = f"{first_date}~{last_date}交通費用"
+            set_cell_value(ws2, "A9", f"{first_date}~{last_date}交通費用")
 
             output_date = datetime.datetime.now().strftime("%Y%m%d")
             out_filename = f"私車公用補助申請單-{user_name}-{output_date}.xlsx"
