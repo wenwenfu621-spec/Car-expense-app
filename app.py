@@ -7,7 +7,7 @@ import openpyxl
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260811-EXPENSE-TOTAL-FIX"
+APP_VERSION = "20260811-TITLE-CENTER-FIX"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -60,9 +60,9 @@ def inject_auto_focus_js():
     components.html(js_code, height=0, width=0)
 
 
-# 1. 網頁標題 (自訂 CSS 樣式，確保單一行顯示不折行)
+# 1. 網頁標題 (置中顯示、前後加車子圖示、單一行顯示)
 st.markdown(
-    "<h2 style='font-size: 1.6rem; font-weight: 700; white-space: nowrap; margin-top: -10px;'>🚗 私車公用補助單自動化填寫工具</h2>",
+    "<h2 style='font-size: 1.6rem; font-weight: 700; white-space: nowrap; margin-top: -10px; text-align: center;'>🚗 私車公用補助單自動化填寫工具 🚗</h2>",
     unsafe_allow_html=True,
 )
 
@@ -264,7 +264,7 @@ if "parsed_receipts" in st.session_state:
                     "location": loc,
                     "km": int(km),
                     "parking": int(round(float(r["amount"]))),
-                    "toll": toll,
+                    "toll": int(toll),
                     "reason": reason,
                 }
             )
