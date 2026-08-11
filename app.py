@@ -7,14 +7,20 @@ import streamlit as st
 import xlrd
 from xlutils.copy import copy
 
-APP_VERSION = "20260811-UI-FIX"
+APP_VERSION = "20260811-TITLE-FIX"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
 )
 
 st.caption(f"📌 程式版本：`{APP_VERSION}`")
-st.title("🚗 私車公用補助單自動化填寫工具")
+
+# 調整標題字體大小與不換行樣式
+st.markdown(
+    "<h2 style='font-size: 1.75rem; font-weight: 700; white-space: nowrap; margin-top: -10px;'>🚗 私車公用補助單自動化填寫工具</h2>",
+    unsafe_allow_html=True,
+)
+
 st.markdown(
     "上傳停車發票/收據照片或 **PDF 檔**，由 Gemini AI 自動辨識日期與金額，輕鬆生成報銷單！"
 )
@@ -155,10 +161,8 @@ if "parsed_receipts" in st.session_state:
         col_a, col_b = st.columns(2)
         with col_a:
             loc = st.text_input("地點", value="客戶端")
-            # 公里數改為整數格式 (step=1)
             km = st.number_input("公里數", value=0, step=1)
         with col_b:
-            # 回數票改為整數格式 (step=1)
             toll = st.number_input("回數票/過路費", value=0, step=1)
             reason = st.text_input("事由", value="拜訪客戶")
 
@@ -181,11 +185,9 @@ if "parsed_receipts" in st.session_state:
             )
             col1, col2, col3, col4 = st.columns(4)
             loc = col1.text_input(f"地點 #{idx+1}", key=f"loc_{idx}")
-            # 公里數改為整數格式 (step=1)
             km = col2.number_input(
                 f"公里數 #{idx+1}", value=0, step=1, key=f"km_{idx}"
             )
-            # 回數票改為整數格式 (step=1)
             toll = col3.number_input(
                 f"回數票 #{idx+1}", value=0, step=1, key=f"toll_{idx}"
             )
@@ -197,7 +199,7 @@ if "parsed_receipts" in st.session_state:
                     "location": loc,
                     "km": int(km),
                     "parking": int(round(float(r["amount"]))),
-                    "toll": int(toll),
+                    "toll": toll,
                     "reason": reason,
                 }
             )
@@ -211,33 +213,58 @@ if "parsed_receipts" in st.session_state:
             rb = xlrd.open_workbook(template_path, formatting_info=True)
             wb = copy(rb)
 
+            def write_with_style(wt_sheet, rd_sheet, row, col, value):
+                """讀取原始儲存格的 XF 格式並寫入，確保劃線框與對齊不遺失"""
+                try:
+                    cell = rd_sheet.cell(row, col)
+                    xf_idx = cell.xf_index
+                    style = wb.get_xf_style(xf_idx)
+                    wt_sheet.write(row, col, value, style)
+                except Exception:
+                    wt_sheet.write(row, col, value)
+
             # Sheet 1: 私車公用單
+            rd_sheet1 = rb.sheet_by_index(0)
             sheet1 = wb.get_sheet(0)
-            sheet1.write(2, 1, user_name)  # B3 姓名
-            sheet1.write(2, 3, user_dept)  # E3 部門
+
+            # 保持列印自適應頁面
+            sheet1.fit_num_pages = 1
+            sheet1.fit_width_to_pages = 1
+            sheet1.fit_height_to_pages = 1
+
+            write_with_style(sheet1, rd_sheet1, 2, 1, user_name)  # B3
+            write_with_style(sheet1, rd_sheet1, 2, 3, user_dept)  # E3
 
             total_parking_and_toll = 0
             for i, item in enumerate(details):
                 row = 4 + i
-                sheet1.write(row, 0, item["date"])  # A 日期
-                sheet1.write(row, 1, item["location"])  # B 地點
-                sheet1.write(row, 3, item["km"])  # D 公里數 (整數)
-                sheet1.write(row, 4, item["parking"])  # E 停車費 (整數)
-                sheet1.write(row, 5, item["toll"])  # F 回數票 (整數)
-                sheet1.write(row, 7, item["reason"])  # H 事由
+                write_with_style(sheet1, rd_sheet1, row, 0, item["date"])
+                write_with_style(sheet1, rd_sheet1, row, 1, item["location"])
+                write_with_style(sheet1, rd_sheet1, row, 3, item["km"])
+                write_with_style(sheet1, rd_sheet1, row, 4, item["parking"])
+                write_with_style(sheet1, rd_sheet1, row, 5, item["toll"])
+                write_with_style(sheet1, rd_sheet1, row, 7, item["reason"])
                 total_parking_and_toll += item["parking"] + item["toll"]
 
             # Sheet 2: 支出憑單
+            rd_sheet2 = rb.sheet_by_index(1)
             sheet2 = wb.get_sheet(1)
+
+            sheet2.fit_num_pages = 1
+            sheet2.fit_width_to_pages = 1
+            sheet2.fit_height_to_pages = 1
+
             today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
-            sheet2.write(4, 6, today_str)  # G5 日期
-            sheet2.write(6, 2, user_dept)  # C7 部門
+            write_with_style(sheet2, rd_sheet2, 4, 6, today_str)
+            write_with_style(sheet2, rd_sheet2, 6, 2, user_dept)
 
             first_date = details[0]["date"]
             last_date = details[-1]["date"]
-            sheet2.write(8, 0, f"{first_date}~{last_date}交通費用")  # A9 日期區間
-            sheet2.write(8, 6, total_parking_and_toll)  # G9 金額
-            sheet2.write(16, 6, total_parking_and_toll)  # G17 小計
+            write_with_style(
+                sheet2, rd_sheet2, 8, 0, f"{first_date}~{last_date}交通費用"
+            )
+            write_with_style(sheet2, rd_sheet2, 8, 6, total_parking_and_toll)
+            write_with_style(sheet2, rd_sheet2, 16, 6, total_parking_and_toll)
 
             output_date = datetime.datetime.now().strftime("%Y%m%d")
             out_filename = f"私車公用補助申請單-{user_name}-{output_date}.xls"
