@@ -1,4 +1,4 @@
-# 📌 程式版本：20260811-CROP-RECEIPT-FIX
+# 📌 程式版本：20260811-WORD-PAGE-ROTATE-FIX
 streamlit
 google-generativeai
 openpyxl
