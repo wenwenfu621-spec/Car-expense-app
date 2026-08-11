@@ -14,7 +14,7 @@ from PIL import Image
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260811-CROP-RECEIPT-FIX"
+APP_VERSION = "20260811-WORD-PAGE-ROTATE-FIX"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -23,13 +23,14 @@ st.set_page_config(
 st.caption(f"📌 程式版本：`{APP_VERSION}`")
 
 
-# 注入 JavaScript：處理按 Enter 自動跳下一欄位與游標閃爍 Focus
+# 注入 JavaScript：處理按 Enter 自動跳下一欄位（排除 disabled 欄位）與 Focus
 def inject_enter_focus_js():
     js_code = """
     <script>
     function setupEnterNavigation() {
         const doc = window.parent.document;
-        const inputs = Array.from(doc.querySelectorAll('input[type="text"], input[type="number"]'));
+        // 僅抓取未被停用 (not disabled) 的文字與數字輸入框
+        const inputs = Array.from(doc.querySelectorAll('input[type="text"]:not([disabled]), input[type="number"]:not([disabled])'));
         
         inputs.forEach((input, index) => {
             if (!input.dataset.enterBound) {
@@ -37,7 +38,7 @@ def inject_enter_focus_js():
                 input.addEventListener('keydown', function(e) {
                     if (e.key === 'Enter') {
                         setTimeout(() => {
-                            const updatedInputs = Array.from(doc.querySelectorAll('input[type="text"], input[type="number"]'));
+                            const updatedInputs = Array.from(doc.querySelectorAll('input[type="text"]:not([disabled]), input[type="number"]:not([disabled])'));
                             const nextInput = updatedInputs[index + 1];
                             if (nextInput) {
                                 nextInput.focus();
@@ -52,7 +53,7 @@ def inject_enter_focus_js():
         });
 
         const active = doc.activeElement;
-        if (!active || active.tagName !== 'INPUT') {
+        if (!active || active.tagName !== 'INPUT' || active.disabled) {
             const emptyInput = inputs.find(i => i.value.trim() === '');
             if (emptyInput) {
                 emptyInput.focus();
@@ -131,7 +132,7 @@ def set_cell_value(ws, cell_ref, value):
 
 
 def crop_and_rotate_receipt_bytes(raw_bytes, box_2d, rotate_deg):
-    """將圖片去背/裁切出收據區域，並自動旋轉扶正"""
+    """將圖片去背/裁切出收據區域，並自動旋轉扶正為直立方向"""
     try:
         image = Image.open(io.BytesIO(raw_bytes))
 
@@ -140,16 +141,15 @@ def crop_and_rotate_receipt_bytes(raw_bytes, box_2d, rotate_deg):
             w, h = image.size
             ymin, xmin, ymax, xmax = box_2d
 
-            # 轉為實際像素，邊緣外擴 15 像素避免切到內文
-            left = max(0, int(xmin * w / 1000) - 15)
-            top = max(0, int(ymin * h / 1000) - 15)
-            right = min(w, int(xmax * w / 1000) + 15)
-            bottom = min(h, int(ymax * h / 1000) + 15)
+            left = max(0, int(xmin * w / 1000) - 10)
+            top = max(0, int(ymin * h / 1000) - 10)
+            right = min(w, int(xmax * w / 1000) + 10)
+            bottom = min(h, int(ymax * h / 1000) + 10)
 
             if right > left and bottom > top:
                 image = image.crop((left, top, right, bottom))
 
-        # 2. 自動扶正旋轉
+        # 2. 自動順時針旋轉扶正
         if rotate_deg in [90, 180, 270]:
             if rotate_deg == 90:
                 image = image.transpose(Image.ROTATE_270)
@@ -191,11 +191,15 @@ def process_images_with_gemini(files, key):
     你是一個財務報銷助手。請讀取這份發票/收據照片或文件，並提取以下資訊：
     1. date: 發票日期，格式請統一轉換為 YYYYMMDD（例如 20260603）。若無法取得年份，預設為當前年份。
     2. amount: 停車費金額 (數字)。
-    3. box_2d: 圖片中「收據/發票紙張本體」的範圍座標 [ymin, xmin, ymax, xmax]，數值請以 0 到 1000 之間的整數表示（相對於圖片長寬比例）。若為全頁 PDF 或無法辨識桌背景，請輸出 [0, 0, 1000, 1000]。
-    4. rotate: 將文字扶正所需的順時針旋轉角度，請由 [0, 90, 180, 270] 中選擇一個整數。
+    3. box_2d: 圖片中「收據/發票紙張本體」的範圍座標 [ymin, xmin, ymax, xmax]，數值請以 0 到 1000 之間的整數表示。請貼緊收據邊緣去背。若為 PDF 則輸出 [0, 0, 1000, 1000]。
+    4. rotate: 圖片中收據文字的方向。為了讓收據變成「文字由左至右、由上至下正向讀取」的直立長條狀，請判斷需要【順時針旋轉多少度】：
+       - 若文字已經正面朝上（不需要旋轉）：輸出 0
+       - 若文字向左傾倒 90 度（頭朝左）：輸出 90
+       - 若文字倒立（頭朝下）：輸出 180
+       - 若文字向右傾倒 90 度（頭朝右）：輸出 270
     
     請直接輸出純 JSON 格式，例如：
-    {"date": "20260603", "amount": 150, "box_2d": [200, 300, 800, 700], "rotate": 0}
+    {"date": "20260603", "amount": 150, "box_2d": [150, 250, 850, 750], "rotate": 90}
     注意：絕對不要加上 ```json 或任何 markdown 標記。
     """
 
@@ -233,7 +237,7 @@ def process_images_with_gemini(files, key):
                 box_2d = res_json.get("box_2d", [0, 0, 1000, 1000])
                 rotate_deg = res_json.get("rotate", 0)
 
-                # 若上傳的是圖片，自動進行去背裁切與扶正
+                # 若為圖片，自動去背裁切並旋轉至正向直立
                 if file_ext in ["jpg", "jpeg", "png"]:
                     processed_bytes = crop_and_rotate_receipt_bytes(
                         bytes_data, box_2d, rotate_deg
@@ -277,7 +281,7 @@ if "parsed_receipts" in st.session_state:
 
     st.subheader("📝 補充填寫報銷明細")
 
-    # 提供 4 個個別勾選按鈕 (一排橫向排列)
+    # 4 個獨立勾選按鈕 (橫向排列)
     chk_col1, chk_col2, chk_col3, chk_col4 = st.columns(4)
     same_loc = chk_col1.checkbox("所有【地點】相同")
     same_km = chk_col2.checkbox("所有【公里數】相同")
@@ -466,7 +470,7 @@ if "parsed_receipts" in st.session_state:
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     )
 
-    # 產出 Word 報支單據憑證檔 (標楷體、置中、一頁一張、自動去背裁切)
+    # 產出 Word 報支單據憑證檔 (標楷體、置中、一頁一張、防跨頁拆分)
     with btn_col2:
         if st.button("📄 產出 Word 報支單據檔"):
             doc = Document()
@@ -475,7 +479,7 @@ if "parsed_receipts" in st.session_state:
                 if idx > 0:
                     doc.add_page_break()
 
-                # 1. 標題段落 (置中 + 標楷體 + 緊接下一段不分頁)
+                # 1. 標題段落 (置中 + 標楷體 + 強制同頁)
                 p = doc.add_paragraph()
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 p.paragraph_format.keep_with_next = True
@@ -486,7 +490,7 @@ if "parsed_receipts" in st.session_state:
                 run.font.name = "標楷體"
                 run._element.rPr.rFonts.set(qn("w:eastAsia"), "標楷體")
 
-                # 2. 圖片段落 (置中)
+                # 2. 圖片段落 (置中，精準控制尺寸確保單頁容納)
                 p_img = doc.add_paragraph()
                 p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
@@ -506,7 +510,8 @@ if "parsed_receipts" in st.session_state:
                 if img_stream:
                     try:
                         run_img = p_img.add_run()
-                        run_img.add_picture(img_stream, width=Inches(3.5))
+                        # 精準限制寬度為 2.5 英吋，確保長條單據 + 標題 100% 擠在同一頁
+                        run_img.add_picture(img_stream, width=Inches(2.5))
                     except Exception as e:
                         p_img.add_run(f"[圖片載入失敗: {e}]")
 
