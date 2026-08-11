@@ -14,7 +14,7 @@ from PIL import Image, ImageOps
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260811-SINGLE-PAGE-EXIF-FIX"
+APP_VERSION = "20260811-AUTO-SCALE-NAV-FIX"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -23,45 +23,48 @@ st.set_page_config(
 st.caption(f"📌 程式版本：`{APP_VERSION}`")
 
 
-# 注入 JavaScript：處理按 Enter 自動跳下一欄位（排除 disabled 欄位）與 Focus
+# 注入 JavaScript：強效導航演算法，完美跳過 disabled 欄位並自動 Focus 下一個可輸入框
 def inject_enter_focus_js():
     js_code = """
     <script>
     function setupEnterNavigation() {
         const doc = window.parent.document;
-        const inputs = Array.from(doc.querySelectorAll('input[type="text"]:not([disabled]), input[type="number"]:not([disabled])'));
         
-        inputs.forEach((input, index) => {
-            if (!input.dataset.enterBound) {
-                input.dataset.enterBound = "true";
-                input.addEventListener('keydown', function(e) {
-                    if (e.key === 'Enter') {
-                        setTimeout(() => {
-                            const updatedInputs = Array.from(doc.querySelectorAll('input[type="text"]:not([disabled]), input[type="number"]:not([disabled])'));
-                            const nextInput = updatedInputs[index + 1];
-                            if (nextInput) {
-                                nextInput.focus();
-                                if (typeof nextInput.select === 'function') {
-                                    nextInput.select();
-                                }
+        function attachListeners() {
+            const allInputs = Array.from(doc.querySelectorAll('input[type="text"], input[type="number"]'));
+            
+            allInputs.forEach((input) => {
+                if (!input.dataset.enterBound) {
+                    input.dataset.enterBound = "true";
+                    input.addEventListener('keydown', function(e) {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            
+                            // 即時重新抓取目前頁面上所有【可編輯/未停用】的輸入框
+                            const validInputs = Array.from(doc.querySelectorAll('input[type="text"]:not([disabled]), input[type="number"]:not([disabled])'));
+                            const currentIndex = validInputs.indexOf(this);
+                            
+                            if (currentIndex !== -1 && currentIndex < validInputs.length - 1) {
+                                const nextInput = validInputs[currentIndex + 1];
+                                setTimeout(() => {
+                                    nextInput.focus();
+                                    if (typeof nextInput.select === 'function') {
+                                        nextInput.select();
+                                    }
+                                }, 100);
                             }
-                        }, 150);
-                    }
-                });
-            }
-        });
-
-        const active = doc.activeElement;
-        if (!active || active.tagName !== 'INPUT' || active.disabled) {
-            const emptyInput = inputs.find(i => i.value.trim() === '');
-            if (emptyInput) {
-                emptyInput.focus();
-            }
+                        }
+                    });
+                }
+            });
         }
+
+        attachListeners();
+        // 應對 Streamlit 動態渲染，間隔觸發綁定
+        setInterval(attachListeners, 1000);
     }
     
     setTimeout(setupEnterNavigation, 300);
-    setTimeout(setupEnterNavigation, 800);
     </script>
     """
     components.html(js_code, height=0, width=0)
@@ -134,10 +137,8 @@ def crop_and_rotate_receipt_bytes(raw_bytes, box_2d, rotate_deg):
     """將照片轉正 (EXIF 修正)、去背裁切，並旋轉為直立長條方向"""
     try:
         image = Image.open(io.BytesIO(raw_bytes))
-        # 1. 關鍵修復：依據手機拍攝 EXIF 資訊進行物理轉正
         image = ImageOps.exif_transpose(image)
 
-        # 2. 根據 Gemini 回傳範圍裁切 (0~1000)
         if box_2d and isinstance(box_2d, list) and len(box_2d) == 4:
             w, h = image.size
             ymin, xmin, ymax, xmax = box_2d
@@ -150,7 +151,6 @@ def crop_and_rotate_receipt_bytes(raw_bytes, box_2d, rotate_deg):
             if right > left and bottom > top:
                 image = image.crop((left, top, right, bottom))
 
-        # 3. 旋轉扶正
         if rotate_deg in [90, 180, 270]:
             if rotate_deg == 90:
                 image = image.transpose(Image.ROTATE_270)
@@ -281,7 +281,6 @@ if "parsed_receipts" in st.session_state:
 
     st.subheader("📝 補充填寫報銷明細")
 
-    # 4 個獨立勾選按鈕 (橫向排列)
     chk_col1, chk_col2, chk_col3, chk_col4 = st.columns(4)
     same_loc = chk_col1.checkbox("所有【地點】相同")
     same_km = chk_col2.checkbox("所有【公里數】相同")
@@ -291,7 +290,6 @@ if "parsed_receipts" in st.session_state:
     st.markdown("---")
     details = []
 
-    # 記錄單據 #1 的填寫數值（做為後續勾選「相同」時的同步基準）
     first_loc, first_km, first_toll, first_reason = "", 0, 0, ""
 
     for idx, r in enumerate(receipts):
@@ -432,24 +430,24 @@ if "parsed_receipts" in st.session_state:
                 # Sheet 1: 私車公用單
                 ws1 = wb.worksheets[0]
 
-                set_cell_value(ws1, "B3", user_name)  # B3 姓名
-                set_cell_value(ws1, "E3", user_dept)  # E3 部門
+                set_cell_value(ws1, "B3", user_name)
+                set_cell_value(ws1, "E3", user_dept)
 
                 for i, item in enumerate(details):
                     row_num = 5 + i
-                    set_cell_value(ws1, (row_num, 1), item["date"])  # A 欄 日期
-                    set_cell_value(ws1, (row_num, 2), item["location"])  # B 欄 地點
-                    set_cell_value(ws1, (row_num, 4), item["km"])  # D 欄 公里數
-                    set_cell_value(ws1, (row_num, 5), item["parking"])  # E 欄 停車費
-                    set_cell_value(ws1, (row_num, 6), item["toll"])  # F 欄 回數票
-                    set_cell_value(ws1, (row_num, 8), item["reason"])  # H 欄 事由
+                    set_cell_value(ws1, (row_num, 1), item["date"])
+                    set_cell_value(ws1, (row_num, 2), item["location"])
+                    set_cell_value(ws1, (row_num, 4), item["km"])
+                    set_cell_value(ws1, (row_num, 5), item["parking"])
+                    set_cell_value(ws1, (row_num, 6), item["toll"])
+                    set_cell_value(ws1, (row_num, 8), item["reason"])
 
                 # Sheet 2: 支出憑單
                 ws2 = wb.worksheets[1]
                 today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
 
-                set_cell_value(ws2, "G5", today_str)  # G5 日期
-                set_cell_value(ws2, "C7", user_dept)  # C7 部門
+                set_cell_value(ws2, "G5", today_str)
+                set_cell_value(ws2, "C7", user_dept)
 
                 first_date = details[0]["date"]
                 last_date = details[-1]["date"]
@@ -480,7 +478,7 @@ if "parsed_receipts" in st.session_state:
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     )
 
-    # 產出 Word 報支單據憑證檔 (同頁鎖定，強行不跨頁拆分)
+    # 產出 Word 報支單據憑證檔 (強行同頁 + 動態等比縮放防跨頁)
     with btn_col2:
         if st.button("📄 產出 Word 報支單據檔"):
             doc = Document()
@@ -489,7 +487,7 @@ if "parsed_receipts" in st.session_state:
                 if idx > 0:
                     doc.add_page_break()
 
-                # 將標題與圖片強行鎖定在「同一段落 (Paragraph)」，徹底防範標題跟圖片分開跑到不同頁
+                # 將標題與圖片強行綁定在同一段落
                 p = doc.add_paragraph()
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 p.paragraph_format.space_before = Pt(0)
@@ -503,7 +501,7 @@ if "parsed_receipts" in st.session_state:
                 run_title.font.name = "標楷體"
                 run_title._element.rPr.rFonts.set(qn("w:eastAsia"), "標楷體")
 
-                # 2. 寫入圖片
+                # 2. 寫入圖片（動態計算比例防跨頁）
                 raw_bytes = item["raw_bytes"]
                 ext = item["file_ext"]
 
@@ -519,9 +517,25 @@ if "parsed_receipts" in st.session_state:
 
                 if img_stream:
                     try:
+                        # 讀取圖片長寬比，進行智慧防超長等比縮放
+                        pil_img = Image.open(img_stream)
+                        w, h = pil_img.size
+                        aspect_ratio = h / w if w > 0 else 1.0
+
+                        # 基礎設定寬度為 2.2 英吋，若縱橫比過高，限制最大高度為 4.8 英吋
+                        target_width = 2.2
+                        target_height = target_width * aspect_ratio
+
+                        if target_height > 4.8:
+                            target_height = 4.8
+                            target_width = target_height / aspect_ratio
+
+                        # 重製 stream 指標寫入 Word
+                        img_stream.seek(0)
                         run_img = p.add_run()
-                        # 限制寬度最大 2.3 英吋，保證與上方文字完美留在同一頁內
-                        run_img.add_picture(img_stream, width=Inches(2.3))
+                        run_img.add_picture(
+                            img_stream, width=Inches(target_width)
+                        )
                     except Exception as e:
                         p.add_run(f"[圖片載入失敗: {e}]")
 
