@@ -1,5 +1,6 @@
 streamlit
 google-generativeai
 openpyxl
-xlrd==1.2.0
-xlutils
+python-docx
+PyMuPDF
+Pillow
