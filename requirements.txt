@@ -1,3 +1,4 @@
+# 📌 程式版本：20260811-CROP-RECEIPT-FIX
 streamlit
 google-generativeai
 openpyxl
