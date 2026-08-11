@@ -38,7 +38,7 @@ with col2:
 # 3. 上傳檔案 (支援 JPG, PNG, PDF)
 uploaded_files = st.file_uploader(
     "1. 上傳停車發票/收據（照片或 PDF 檔，可多選）",
-    type=["jpg", "jpeg", "png", "pdf"],  # 已新增支援 pdf
+    type=["jpg", "jpeg", "png", "pdf"],
     accept_multiple_files=True,
 )
 
@@ -55,7 +55,6 @@ def process_images_with_gemini(files):
     for uploaded_file in files:
         bytes_data = uploaded_file.read()
 
-        # 自動判斷檔案 MIME 類型 (照片或 PDF)
         file_ext = uploaded_file.name.split(".")[-1].lower()
         if file_ext == "pdf":
             mime_type = "application/pdf"
@@ -64,9 +63,10 @@ def process_images_with_gemini(files):
         else:
             mime_type = "image/jpeg"
 
+        # 優先嘗試模型順序：gemini-2.0-flash -> gemini-1.5-flash
         try:
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-2.0-flash",
                 contents=[
                     types.Part.from_bytes(data=bytes_data, mime_type=mime_type),
                     prompt,
@@ -77,12 +77,31 @@ def process_images_with_gemini(files):
             )
             res_json = json.loads(response.text)
             results.append(res_json)
-        except Exception as e:
-            st.error(f"❌ 解析檔案 『{uploaded_file.name}』 時發生錯誤：{e}")
-            st.info(
-                "💡 請檢查：1. API Key 是否正確？ 2. 檔案內容是否清晰包含發票金額與日期？"
-            )
-            st.stop()
+        except Exception as e1:
+            try:
+                # 備援模型嘗試
+                response = client.models.generate_content(
+                    model="gemini-1.5-flash",
+                    contents=[
+                        types.Part.from_bytes(
+                            data=bytes_data, mime_type=mime_type
+                        ),
+                        prompt,
+                    ],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json"
+                    ),
+                )
+                res_json = json.loads(response.text)
+                results.append(res_json)
+            except Exception as e2:
+                st.error(
+                    f"❌ 解析檔案 『{uploaded_file.name}』 時發生錯誤：{e2}"
+                )
+                st.info(
+                    "💡 請檢查 API Key 是否正確，或檔案內容是否清晰包含發票金額與日期。"
+                )
+                st.stop()
 
     results.sort(key=lambda x: x["date"])
     return results
@@ -165,33 +184,33 @@ if "parsed_receipts" in st.session_state:
 
             # Sheet 1: 私車公用單
             sheet1 = wb.get_sheet(0)
-            sheet1.write(2, 1, user_name)  # B3
-            sheet1.write(2, 3, user_dept)  # E3
+            sheet1.write(2, 1, user_name)  # B3 姓名
+            sheet1.write(2, 3, user_dept)  # E3 部門
 
             total_parking_and_toll = 0
             for i, item in enumerate(details):
-                row = 4 + i
-                sheet1.write(row, 0, item["date"])  # A
-                sheet1.write(row, 1, item["location"])  # B
-                sheet1.write(row, 3, item["km"])  # D
-                sheet1.write(row, 4, item["parking"])  # E
-                sheet1.write(row, 5, item["toll"])  # F
-                sheet1.write(row, 7, item["reason"])  # H
+                row = 4 + i  # 第 5 列開始
+                sheet1.write(row, 0, item["date"])  # A 日期
+                sheet1.write(row, 1, item["location"])  # B 地點
+                sheet1.write(row, 3, item["km"])  # D 公里數
+                sheet1.write(row, 4, item["parking"])  # E 停車費
+                sheet1.write(row, 5, item["toll"])  # F 回數票
+                sheet1.write(row, 7, item["reason"])  # H 事由
                 total_parking_and_toll += item["parking"] + item["toll"]
 
             # Sheet 2: 支出憑單
             sheet2 = wb.get_sheet(1)
             today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
-            sheet2.write(4, 6, today_str)  # G5
-            sheet2.write(6, 2, user_dept)  # C7
+            sheet2.write(4, 6, today_str)  # G5 日期
+            sheet2.write(6, 2, user_dept)  # C7 部門/專案編號
 
             first_date = details[0]["date"]
             last_date = details[-1]["date"]
-            sheet2.write(8, 0, f"{first_date}~{last_date}交通費用")  # A9
-            sheet2.write(8, 6, total_parking_and_toll)  # G9
-            sheet2.write(16, 6, total_parking_and_toll)  # G17
+            sheet2.write(8, 0, f"{first_date}~{last_date}交通費用")  # A9 日期區間
+            sheet2.write(8, 6, total_parking_and_toll)  # G9 金額
+            sheet2.write(16, 6, total_parking_and_toll)  # G17 小計
 
-            # 產生下載
+            # 產生下載檔
             output_date = datetime.datetime.now().strftime("%Y%m%d")
             out_filename = f"私車公用補助申請單-{user_name}-{output_date}.xls"
 
