@@ -7,7 +7,7 @@ import streamlit as st
 import xlrd
 from xlutils.copy import copy
 
-APP_VERSION = "20260811-LAYOUT-FIX"
+APP_VERSION = "20260811-UI-FIX"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -155,9 +155,11 @@ if "parsed_receipts" in st.session_state:
         col_a, col_b = st.columns(2)
         with col_a:
             loc = st.text_input("地點", value="客戶端")
-            km = st.number_input("公里數", value=0.0)
+            # 公里數改為整數格式 (step=1)
+            km = st.number_input("公里數", value=0, step=1)
         with col_b:
-            toll = st.number_input("回數票/過路費", value=0.0)
+            # 回數票改為整數格式 (step=1)
+            toll = st.number_input("回數票/過路費", value=0, step=1)
             reason = st.text_input("事由", value="拜訪客戶")
 
         for r in receipts:
@@ -165,9 +167,9 @@ if "parsed_receipts" in st.session_state:
                 {
                     "date": format_date_to_excel(r["date"]),
                     "location": loc,
-                    "km": km,
-                    "parking": float(r["amount"]),
-                    "toll": toll,
+                    "km": int(km),
+                    "parking": int(round(float(r["amount"]))),
+                    "toll": int(toll),
                     "reason": reason,
                 }
             )
@@ -179,11 +181,13 @@ if "parsed_receipts" in st.session_state:
             )
             col1, col2, col3, col4 = st.columns(4)
             loc = col1.text_input(f"地點 #{idx+1}", key=f"loc_{idx}")
+            # 公里數改為整數格式 (step=1)
             km = col2.number_input(
-                f"公里數 #{idx+1}", value=0.0, key=f"km_{idx}"
+                f"公里數 #{idx+1}", value=0, step=1, key=f"km_{idx}"
             )
+            # 回數票改為整數格式 (step=1)
             toll = col3.number_input(
-                f"回數票 #{idx+1}", value=0.0, key=f"toll_{idx}"
+                f"回數票 #{idx+1}", value=0, step=1, key=f"toll_{idx}"
             )
             reason = col4.text_input(f"事由 #{idx+1}", key=f"reason_{idx}")
 
@@ -191,9 +195,9 @@ if "parsed_receipts" in st.session_state:
                 {
                     "date": formatted_date,
                     "location": loc,
-                    "km": km,
-                    "parking": float(r["amount"]),
-                    "toll": toll,
+                    "km": int(km),
+                    "parking": int(round(float(r["amount"]))),
+                    "toll": int(toll),
                     "reason": reason,
                 }
             )
@@ -207,15 +211,6 @@ if "parsed_receipts" in st.session_state:
             rb = xlrd.open_workbook(template_path, formatting_info=True)
             wb = copy(rb)
 
-            # Sheet 1 & Sheet 2: 強制鎖定 A4 紙張與單頁寬度自適應
-            for s_idx in range(len(rb.sheets())):
-                wt_sheet = wb.get_sheet(s_idx)
-                wt_sheet.paper_size_code = 9  # 9 代表 A4 規格
-                wt_sheet.fit_num_pages = 1  # 強制自適應 1 頁
-                wt_sheet.fit_width_to_pages = 1  # 寬度符合 1 頁
-                wt_sheet.fit_height_to_pages = 1  # 高度符合 1 頁
-                wt_sheet.set_fit_to_pages(True)  # 啟用頁面自適應
-
             # Sheet 1: 私車公用單
             sheet1 = wb.get_sheet(0)
             sheet1.write(2, 1, user_name)  # B3 姓名
@@ -224,11 +219,11 @@ if "parsed_receipts" in st.session_state:
             total_parking_and_toll = 0
             for i, item in enumerate(details):
                 row = 4 + i
-                sheet1.write(row, 0, item["date"])  # A 日期 (2026/06/04)
+                sheet1.write(row, 0, item["date"])  # A 日期
                 sheet1.write(row, 1, item["location"])  # B 地點
-                sheet1.write(row, 3, item["km"])  # D 公里數
-                sheet1.write(row, 4, item["parking"])  # E 停車費
-                sheet1.write(row, 5, item["toll"])  # F 回數票
+                sheet1.write(row, 3, item["km"])  # D 公里數 (整數)
+                sheet1.write(row, 4, item["parking"])  # E 停車費 (整數)
+                sheet1.write(row, 5, item["toll"])  # F 回數票 (整數)
                 sheet1.write(row, 7, item["reason"])  # H 事由
                 total_parking_and_toll += item["parking"] + item["toll"]
 
@@ -236,7 +231,7 @@ if "parsed_receipts" in st.session_state:
             sheet2 = wb.get_sheet(1)
             today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
             sheet2.write(4, 6, today_str)  # G5 日期
-            sheet2.write(6, 2, user_dept)  # C7 部門/專案編號
+            sheet2.write(6, 2, user_dept)  # C7 部門
 
             first_date = details[0]["date"]
             last_date = details[-1]["date"]
