@@ -6,7 +6,7 @@ import google.generativeai as genai
 import openpyxl
 import streamlit as st
 
-APP_VERSION = "20260811-OPENPYXL-FIX"
+APP_VERSION = "20260811-PERFECT-V2"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -14,9 +14,9 @@ st.set_page_config(
 
 st.caption(f"📌 程式版本：`{APP_VERSION}`")
 
-# 標題樣式 (保持單一行)
+# 1. 網頁標題 (自訂 CSS 樣式，確保單一行顯示不折行)
 st.markdown(
-    "<h2 style='font-size: 1.75rem; font-weight: 700; white-space: nowrap; margin-top: -10px;'>🚗 私車公用補助單自動化填寫工具</h2>",
+    "<h2 style='font-size: 1.6rem; font-weight: 700; white-space: nowrap; margin-top: -10px;'>🚗 私車公用補助單自動化填寫工具</h2>",
     unsafe_allow_html=True,
 )
 
@@ -24,7 +24,7 @@ st.markdown(
     "上傳停車發票/收據照片或 **PDF 檔**，由 Gemini AI 自動辨識日期與金額，輕鬆生成報銷單！"
 )
 
-# 1. API Key 設定
+# 2. API Key 設定
 api_key = st.text_input(
     "請輸入 Gemini API Key：",
     type="password",
@@ -35,14 +35,14 @@ if not api_key:
     st.warning("⚠️ 請先輸入 Gemini API Key 才能開始使用。")
     st.stop()
 
-# 2. 基本資料填寫
+# 3. 基本資料填寫
 col1, col2 = st.columns(2)
 with col1:
     user_name = st.text_input("姓名", placeholder="例如：王大明")
 with col2:
     user_dept = st.text_input("部門", placeholder="例如：研發部")
 
-# 3. 上傳檔案
+# 4. 上傳檔案
 uploaded_files = st.file_uploader(
     "1. 上傳停車發票/收據（照片或 PDF 檔，可多選）",
     type=["jpg", "jpeg", "png", "pdf"],
@@ -146,7 +146,7 @@ if uploaded_files and user_name and user_dept:
             f"成功辨識 {len(st.session_state['parsed_receipts'])} 筆單據資料！"
         )
 
-# 4. 補充欄位與匯出 Excel
+# 5. 補充欄位與匯出 Excel
 if "parsed_receipts" in st.session_state:
     receipts = st.session_state["parsed_receipts"]
 
@@ -204,116 +204,56 @@ if "parsed_receipts" in st.session_state:
             )
 
     if st.button("🚀 產出 Excel 報銷檔案"):
-        # 優先找 xlsx，若無則找 xls
         template_xlsx = "私車公用補助申請單.xlsx"
-        template_xls = "私車公用補助申請單.xls"
 
-        use_openpyxl = False
-        template_path = None
-
-        if os.path.exists(template_xlsx):
-            template_path = template_xlsx
-            use_openpyxl = True
-        elif os.path.exists(template_xls):
-            template_path = template_xls
-            use_openpyxl = False
-
-        if not template_path:
-            st.error("系統找不到預設範本『私車公用補助申請單』！")
+        if not os.path.exists(template_xlsx):
+            st.error(
+                "系統找不到範本『私車公用補助申請單.xlsx』！請確認檔名是否包含 .xlsx"
+            )
         else:
-            if use_openpyxl:
-                # 使用 openpyxl：100% 保留公式與原本邊框
-                wb = openpyxl.load_workbook(template_path)
+            # 讀取 xlsx 範本 (保留全部公式與邊框格式)
+            wb = openpyxl.load_workbook(template_xlsx)
 
-                # Sheet 1: 私車公用單
-                sheet1 = wb.worksheets[0]
-                sheet1["B3"] = user_name
-                sheet1["E3"] = user_dept
+            # Sheet 1: 私車公用單
+            ws1 = wb.worksheets[0]
 
-                for i, item in enumerate(details):
-                    row = 5 + i  # openpyxl 索引從 1 開始，第 5 列開始寫
-                    sheet1.cell(row=row, column=1, value=item["date"])  # A
-                    sheet1.cell(row=row, column=2, value=item["location"])  # B
-                    sheet1.cell(row=row, column=4, value=item["km"])  # D
-                    sheet1.cell(row=row, column=5, value=item["parking"])  # E
-                    sheet1.cell(row=row, column=6, value=item["toll"])  # F
-                    sheet1.cell(row=row, column=8, value=item["reason"])  # H
+            # 填寫抬頭
+            ws1["B3"].value = user_name
+            ws1["E3"].value = user_dept
 
-                # Sheet 2: 支出憑單
-                sheet2 = wb.worksheets[1]
-                today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
-                sheet2["G5"] = today_str
-                sheet2["C7"] = user_dept
+            # 填寫單據明細 (從第 5 列開始填入，絕不上抹除原本邊框)
+            for i, item in enumerate(details):
+                row_num = 5 + i
+                ws1.cell(row=row_num, column=1).value = item["date"]  # A 欄 日期
+                ws1.cell(row=row_num, column=2).value = item["location"]  # B 欄 地點
+                ws1.cell(row=row_num, column=4).value = item["km"]  # D 欄 公里數
+                ws1.cell(row=row_num, column=5).value = item["parking"]  # E 欄 停車費
+                ws1.cell(row=row_num, column=6).value = item["toll"]  # F 欄 回數票
+                ws1.cell(row=row_num, column=8).value = item["reason"]  # H 欄 事由
 
-                first_date = details[0]["date"]
-                last_date = details[-1]["date"]
-                sheet2["A9"] = f"{first_date}~{last_date}交通費用"
+            # 提醒：第 27 列與 28 列維持原範本公式，程式不做任何複寫！
 
-                output_date = datetime.datetime.now().strftime("%Y%m%d")
-                out_filename = (
-                    f"私車公用補助申請單-{user_name}-{output_date}.xlsx"
+            # Sheet 2: 支出憑單
+            ws2 = wb.worksheets[1]
+            today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
+            ws2["G5"].value = today_str  # G5 日期
+            ws2["C7"].value = user_dept  # C7 部門
+
+            first_date = details[0]["date"]
+            last_date = details[-1]["date"]
+            ws2["A9"].value = f"{first_date}~{last_date}交通費用"
+
+            output_date = datetime.datetime.now().strftime("%Y%m%d")
+            out_filename = f"私車公用補助申請單-{user_name}-{output_date}.xlsx"
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+                wb.save(tmp.name)
+                tmp_path = tmp.name
+
+            with open(tmp_path, "rb") as file:
+                st.download_button(
+                    label="📥 點擊下載報銷單 (Excel)",
+                    data=file,
+                    file_name=out_filename,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
-
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=".xlsx"
-                ) as tmp:
-                    wb.save(tmp.name)
-                    tmp_path = tmp.name
-
-                with open(tmp_path, "rb") as file:
-                    st.download_button(
-                        label="📥 點擊下載報銷單 (Excel)",
-                        data=file,
-                        file_name=out_filename,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
-            else:
-                # 備援：使用 xlrd/xlutils 寫入，且不覆蓋公式與合計儲存格
-                import xlrd
-                from xlutils.copy import copy
-
-                rb = xlrd.open_workbook(template_path, formatting_info=True)
-                wb = copy(rb)
-
-                sheet1 = wb.get_sheet(0)
-                sheet1.write(2, 1, user_name)  # B3
-                sheet1.write(2, 3, user_dept)  # E3
-
-                total_parking_and_toll = 0
-                for i, item in enumerate(details):
-                    row = 4 + i
-                    sheet1.write(row, 0, item["date"])  # A
-                    sheet1.write(row, 1, item["location"])  # B
-                    sheet1.write(row, 3, item["km"])  # D
-                    sheet1.write(row, 4, item["parking"])  # E
-                    sheet1.write(row, 5, item["toll"])  # F
-                    sheet1.write(row, 7, item["reason"])  # H
-                    total_parking_and_toll += item["parking"] + item["toll"]
-
-                sheet2 = wb.get_sheet(1)
-                today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
-                sheet2.write(4, 6, today_str)  # G5
-                sheet2.write(6, 2, user_dept)  # C7
-
-                first_date = details[0]["date"]
-                last_date = details[-1]["date"]
-                sheet2.write(8, 0, f"{first_date}~{last_date}交通費用")  # A9
-
-                output_date = datetime.datetime.now().strftime("%Y%m%d")
-                out_filename = (
-                    f"私車公用補助申請單-{user_name}-{output_date}.xls"
-                )
-
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=".xls"
-                ) as tmp:
-                    wb.save(tmp.name)
-                    tmp_path = tmp.name
-
-                with open(tmp_path, "rb") as file:
-                    st.download_button(
-                        label="📥 點擊下載報銷單 (Excel)",
-                        data=file,
-                        file_name=out_filename,
-                        mime="application/vnd.ms-excel",
-                    )
