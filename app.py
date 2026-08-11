@@ -12,10 +12,10 @@ st.set_page_config(page_title="私車公用補助單自動化工具", layout="ce
 
 st.title("🚗 私車公用補助單自動化填寫工具")
 st.markdown(
-    "上傳停車發票/收據照片，由 Gemini AI 自動辨識日期與金額，輕鬆生成報銷單！"
+    "上傳停車發票/收據照片或 **PDF 檔**，由 Gemini AI 自動辨識日期與金額，輕鬆生成報銷單！"
 )
 
-# 1. API Key 設定 (可手動輸入或從雲端設定檔讀取)
+# 1. API Key 設定
 api_key = st.text_input(
     "請輸入 Gemini API Key：",
     type="password",
@@ -35,10 +35,10 @@ with col1:
 with col2:
     user_dept = st.text_input("部門", placeholder="例如：研發部")
 
-# 3. 上傳圖片與範本
+# 3. 上傳檔案 (支援 JPG, PNG, PDF)
 uploaded_files = st.file_uploader(
-    "1. 上傳停車發票/收據照片 (可多選)",
-    type=["jpg", "jpeg", "png"],
+    "1. 上傳停車發票/收據（照片或 PDF 檔，可多選）",
+    type=["jpg", "jpeg", "png", "pdf"],  # 已新增支援 pdf
     accept_multiple_files=True,
 )
 
@@ -46,7 +46,7 @@ uploaded_files = st.file_uploader(
 def process_images_with_gemini(files):
     results = []
     prompt = """
-    你是一個財務報銷助手。請讀取這張發票/收據照片，並提取以下資訊：
+    你是一個財務報銷助手。請讀取這份發票/收據（可能是照片或 PDF 文件），並提取以下資訊：
     1. date: 發票日期，格式請統一轉換為 YYYYMMDD（例如 20260603）。若無法取得年份，預設為當前年份。
     2. amount: 停車費金額 (數字)。
     
@@ -54,33 +54,48 @@ def process_images_with_gemini(files):
     """
     for uploaded_file in files:
         bytes_data = uploaded_file.read()
-        mime_type = uploaded_file.type or "image/jpeg"
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=[
-                types.Part.from_bytes(data=bytes_data, mime_type=mime_type),
-                prompt,
-            ],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json"
-            ),
-        )
-        res_json = json.loads(response.text)
-        results.append(res_json)
+        # 自動判斷檔案 MIME 類型 (照片或 PDF)
+        file_ext = uploaded_file.name.split(".")[-1].lower()
+        if file_ext == "pdf":
+            mime_type = "application/pdf"
+        elif file_ext == "png":
+            mime_type = "image/png"
+        else:
+            mime_type = "image/jpeg"
+
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[
+                    types.Part.from_bytes(data=bytes_data, mime_type=mime_type),
+                    prompt,
+                ],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json"
+                ),
+            )
+            res_json = json.loads(response.text)
+            results.append(res_json)
+        except Exception as e:
+            st.error(f"❌ 解析檔案 『{uploaded_file.name}』 時發生錯誤：{e}")
+            st.info(
+                "💡 請檢查：1. API Key 是否正確？ 2. 檔案內容是否清晰包含發票金額與日期？"
+            )
+            st.stop()
 
     results.sort(key=lambda x: x["date"])
     return results
 
 
 if uploaded_files and user_name and user_dept:
-    if st.button("🤖 AI 辨識發票內容"):
-        with st.spinner("Gemini 分析中..."):
+    if st.button("🤖 AI 辨識單據內容"):
+        with st.spinner("Gemini 分析照片/PDF 中..."):
             st.session_state["parsed_receipts"] = process_images_with_gemini(
                 uploaded_files
             )
         st.success(
-            f"成功辨識 {len(st.session_state['parsed_receipts'])} 張發票！"
+            f"成功辨識 {len(st.session_state['parsed_receipts'])} 筆單據資料！"
         )
 
 # 4. 補充欄位填寫與產出
@@ -88,7 +103,9 @@ if "parsed_receipts" in st.session_state:
     receipts = st.session_state["parsed_receipts"]
 
     st.subheader("📝 補充填寫報銷明細")
-    same_for_all = st.checkbox("所有發票的【地點、公里數、回數票、事由】皆相同")
+    same_for_all = st.checkbox(
+        "所有單據的【地點、公里數、回數票、事由】皆相同"
+    )
 
     details = []
     if same_for_all:
@@ -114,7 +131,7 @@ if "parsed_receipts" in st.session_state:
     else:
         for idx, r in enumerate(receipts):
             st.markdown(
-                f"**發票 {idx+1} (日期: {r['date']} / 金額: {r['amount']}元)**"
+                f"**單據 {idx+1} (日期: {r['date']} / 金額: {r['amount']}元)**"
             )
             col1, col2, col3, col4 = st.columns(4)
             loc = col1.text_input(f"地點 #{idx+1}", key=f"loc_{idx}")
