@@ -2,4 +2,3 @@ streamlit
 google-generativeai
 xlrd==1.2.0
 xlutils
-pypdf
