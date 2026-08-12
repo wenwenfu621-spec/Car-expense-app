@@ -15,7 +15,7 @@ from PIL import Image, ImageOps
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260812-FAST-MODEL-FIX"
+APP_VERSION = "20260812-GEMINI-20-FIX"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -220,8 +220,8 @@ def crop_and_rotate_receipt_bytes(raw_bytes, box_2d, rotate_deg):
 def process_images_with_gemini(files, key):
     genai.configure(api_key=key.strip())
 
-    # 極速模型優先清單，刪除慢速模型與 list_models 查詢開銷
-    candidate_models = ["gemini-1.5-flash", "gemini-2.0-flash"]
+    # 直接指定最新超高速模型 gemini-2.0-flash，備用為 gemini-1.5-flash
+    model_name = "gemini-2.0-flash"
 
     prompt = """
     你是一個財務報銷助手。請讀取這份發票/收據照片或文件，並提取以下資訊：
@@ -253,48 +253,55 @@ def process_images_with_gemini(files, key):
 
         content_part = {"mime_type": mime_type, "data": bytes_data}
 
-        success = False
-        last_error = ""
+        try:
+            # 使用最新極速模型直連處理
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content([prompt, content_part])
 
-        for model_name in candidate_models:
-            try:
-                model = genai.GenerativeModel(model_name)
-                response = model.generate_content([prompt, content_part])
+            raw_text = response.text.strip()
+            clean_text = (
+                raw_text.replace("```json", "")
+                .replace("```", "")
+                .strip()
+            )
 
-                raw_text = response.text.strip()
-                clean_text = (
-                    raw_text.replace("```json", "")
-                    .replace("```", "")
-                    .strip()
+            res_json = json.loads(clean_text)
+
+            box_2d = res_json.get("box_2d", [0, 0, 1000, 1000])
+            rotate_deg = res_json.get("rotate", 0)
+
+            if file_ext in ["jpg", "jpeg", "png"]:
+                processed_bytes = crop_and_rotate_receipt_bytes(
+                    bytes_data, box_2d, rotate_deg
                 )
+            else:
+                processed_bytes = bytes_data
 
+            res_json["raw_bytes"] = processed_bytes
+            res_json["file_ext"] = file_ext
+            res_json["filename"] = uploaded_file.name
+            results.append(res_json)
+        except Exception as e:
+            # 若 2.0 遇到狀況，降級備用 1.5-flash 再試一次
+            try:
+                model = genai.GenerativeModel("gemini-1.5-flash")
+                response = model.generate_content([prompt, content_part])
+                raw_text = response.text.strip()
+                clean_text = raw_text.replace("```json", "").replace("```", "").strip()
                 res_json = json.loads(clean_text)
-
                 box_2d = res_json.get("box_2d", [0, 0, 1000, 1000])
                 rotate_deg = res_json.get("rotate", 0)
-
                 if file_ext in ["jpg", "jpeg", "png"]:
-                    processed_bytes = crop_and_rotate_receipt_bytes(
-                        bytes_data, box_2d, rotate_deg
-                    )
+                    processed_bytes = crop_and_rotate_receipt_bytes(bytes_data, box_2d, rotate_deg)
                 else:
                     processed_bytes = bytes_data
-
                 res_json["raw_bytes"] = processed_bytes
                 res_json["file_ext"] = file_ext
                 res_json["filename"] = uploaded_file.name
                 results.append(res_json)
-                success = True
-                break
-            except Exception as e:
-                last_error = str(e)
-                continue
-
-        if not success:
-            st.error(
-                f"❌ 解析檔案 『{uploaded_file.name}』 失敗：{last_error}"
-            )
-            st.stop()
+            except Exception as ex2:
+                st.error(f"❌ 解析檔案 『{uploaded_file.name}』 失敗：{str(ex2)}")
+                st.stop()
 
     results.sort(key=lambda x: x["date"])
     return results
@@ -302,7 +309,7 @@ def process_images_with_gemini(files, key):
 
 if uploaded_files and user_name and user_dept:
     if st.button("🤖 AI 辨識單據內容"):
-        with st.spinner("Gemini 分析照片/PDF 中..."):
+        with st.spinner("Gemini 2.0 Flash 分析照片/PDF 中..."):
             st.session_state["parsed_receipts"] = process_images_with_gemini(
                 uploaded_files, api_key
             )
