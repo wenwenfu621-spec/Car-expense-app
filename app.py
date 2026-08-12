@@ -15,7 +15,7 @@ from PIL import Image, ImageOps
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260811-AVATAR-JPG-FIX"
+APP_VERSION = "20260812-PROJECT-NAME-FIX"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -500,7 +500,9 @@ if "parsed_receipts" in st.session_state:
                 today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
 
                 set_cell_value(ws2, "G5", today_str)
-                set_cell_value(ws2, "C7", user_dept)
+                
+                # 修正此處：改為填寫「專案編號：姓名」
+                set_cell_value(ws2, "C7", f"專案編號：{user_name}")
 
                 first_date = details[0]["date"]
                 last_date = details[-1]["date"]
