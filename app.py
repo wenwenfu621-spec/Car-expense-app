@@ -15,7 +15,7 @@ from PIL import Image, ImageOps
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260812-SECRETS-SAFE-FIX"
+APP_VERSION = "20260812-FAST-MODEL-FIX"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -69,7 +69,7 @@ def inject_enter_focus_js():
     components.html(js_code, height=0, width=0)
 
 
-# 注入右下角個人專屬署名 (Design by Max + 相容 .jpg/.jpeg/.png Q版頭像)
+# 注入右下角個人專屬署名
 def inject_custom_footer():
     avatar_candidates = ["avatar.jpg", "avatar.jpeg", "avatar.png", "avatar.JPG"]
     img_base64 = ""
@@ -220,24 +220,8 @@ def crop_and_rotate_receipt_bytes(raw_bytes, box_2d, rotate_deg):
 def process_images_with_gemini(files, key):
     genai.configure(api_key=key.strip())
 
-    candidate_models = [
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
-        "gemini-2.0-flash",
-        "gemini-2.5-flash",
-    ]
-
-    try:
-        available = [
-            m.name.replace("models/", "")
-            for m in genai.list_models()
-            if "generateContent" in m.supported_generation_methods
-        ]
-        for a in available:
-            if a not in candidate_models:
-                candidate_models.insert(0, a)
-    except Exception:
-        pass
+    # 極速模型優先清單，刪除慢速模型與 list_models 查詢開銷
+    candidate_models = ["gemini-1.5-flash", "gemini-2.0-flash"]
 
     prompt = """
     你是一個財務報銷助手。請讀取這份發票/收據照片或文件，並提取以下資訊：
@@ -529,7 +513,7 @@ if "parsed_receipts" in st.session_state:
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     )
 
-    # 產出 Word 報支單據憑證檔 (強行同頁 + 動態等比縮放防跨頁)
+    # 產出 Word 報支單據憑證檔
     with btn_col2:
         if st.button("📄 產出 Word 報支單據檔"):
             doc = Document()
@@ -551,7 +535,7 @@ if "parsed_receipts" in st.session_state:
                 run_title.font.name = "標楷體"
                 run_title._element.rPr.rFonts.set(qn("w:eastAsia"), "標楷體")
 
-                # 2. 寫入圖片（動態計算比例防跨頁）
+                # 2. 寫入圖片
                 raw_bytes = item["raw_bytes"]
                 ext = item["file_ext"]
 
