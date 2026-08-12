@@ -15,7 +15,7 @@ from PIL import Image, ImageOps
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260812-CLEAN-RESTORE"
+APP_VERSION = "20260812-HIDE-APIKEY-UI"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -133,19 +133,15 @@ st.markdown(
     "上傳停車發票/收據照片或 **PDF 檔**，由 Gemini AI 自動辨識日期與金額，輕鬆生成報銷單！"
 )
 
-# 2. API Key 設定 (優先從 Streamlit Secrets 讀取；若未設定則自動帶入預設值)
+# 2. API Key 設定 (從 Streamlit Secrets 後台讀取，不顯示於畫面上)
 KEY_PART1 = "AQ.Ab8RN6JNdZJgY7a7BDK67Cx"
 KEY_PART2 = "W44rm-vd-bHVwIkaCS84ZPG9yww"
 DEFAULT_API_KEY = KEY_PART1 + KEY_PART2
 
-api_key = st.text_input(
-    "請輸入 Gemini API Key：",
-    type="password",
-    value=st.secrets.get("GEMINI_API_KEY", DEFAULT_API_KEY),
-)
+api_key = st.secrets.get("GEMINI_API_KEY", DEFAULT_API_KEY)
 
 if not api_key:
-    st.warning("⚠️ 請先輸入 Gemini API Key 才能開始使用。")
+    st.error("⚠️ 未偵測到有效的 API Key，請確認 Streamlit Secrets 設定。")
     st.stop()
 
 # 3. 基本資料填寫 (預設全為空字串，以 placeholder 提供填寫提示)
