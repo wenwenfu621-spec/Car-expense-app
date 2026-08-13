@@ -15,7 +15,7 @@ from PIL import Image, ImageOps
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260812-HIDE-APIKEY-UI"
+APP_VERSION = "20260813-GAS-RECEIPT-SUPPORT"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -69,7 +69,7 @@ def inject_enter_focus_js():
     components.html(js_code, height=0, width=0)
 
 
-# 注入右下角個人專屬署名 (Design by Max + 相容 .jpg/.jpeg/.png Q版頭像)
+# 注入右下角個人專屬署名
 def inject_custom_footer():
     avatar_candidates = ["avatar.jpg", "avatar.jpeg", "avatar.png", "avatar.JPG"]
     img_base64 = ""
@@ -123,17 +123,17 @@ def inject_custom_footer():
     st.markdown(footer_css, unsafe_allow_html=True)
 
 
-# 1. 網頁標題 (置中顯示、前後加車子圖示、單一行顯示)
+# 1. 網頁標題
 st.markdown(
     "<h2 style='font-size: 1.6rem; font-weight: 700; white-space: nowrap; margin-top: -10px; text-align: center;'>🚗 私車公用補助單自動化填寫工具 🚗</h2>",
     unsafe_allow_html=True,
 )
 
 st.markdown(
-    "上傳停車發票/收據照片或 **PDF 檔**，由 Gemini AI 自動辨識日期與金額，輕鬆生成報銷單！"
+    "上傳停車/加油發票或 **PDF 檔**，由 Gemini AI 自動辨識日期與金額，輕鬆生成報銷單！"
 )
 
-# 2. API Key 設定 (從 Streamlit Secrets 後台讀取，不顯示於畫面上)
+# 2. API Key 設定 (從 Streamlit Secrets 讀取)
 KEY_PART1 = "AQ.Ab8RN6JNdZJgY7a7BDK67Cx"
 KEY_PART2 = "W44rm-vd-bHVwIkaCS84ZPG9yww"
 DEFAULT_API_KEY = KEY_PART1 + KEY_PART2
@@ -144,16 +144,22 @@ if not api_key:
     st.error("⚠️ 未偵測到有效的 API Key，請確認 Streamlit Secrets 設定。")
     st.stop()
 
-# 3. 基本資料填寫 (預設全為空字串，以 placeholder 提供填寫提示)
+# 3. 基本資料填寫
 col1, col2 = st.columns(2)
 with col1:
     user_name = st.text_input("姓名", value="", placeholder="例如：王大明")
 with col2:
     user_dept = st.text_input("部門", value="", placeholder="例如：研發部")
 
-# 4. 上傳檔案
-uploaded_files = st.file_uploader(
+# 4. 上傳檔案 (包含 1.停車發票與 2.加油發票)
+uploaded_parking_files = st.file_uploader(
     "1. 上傳停車發票/收據（照片或 PDF 檔，可多選）",
+    type=["jpg", "jpeg", "png", "pdf"],
+    accept_multiple_files=True,
+)
+
+uploaded_gas_files = st.file_uploader(
+    "2. 上傳加油發票/收據（照片或 PDF 檔，可多選）",
     type=["jpg", "jpeg", "png", "pdf"],
     accept_multiple_files=True,
 )
@@ -215,7 +221,8 @@ def crop_and_rotate_receipt_bytes(raw_bytes, box_2d, rotate_deg):
         return raw_bytes
 
 
-def process_images_with_gemini(files, key):
+def process_single_file_with_gemini(uploaded_file, receipt_type, key):
+    """處理單個發票/收據檔案解析 (receipt_type: 'parking' 或 'gas')"""
     genai.configure(api_key=key.strip())
 
     candidate_models = [
@@ -240,7 +247,7 @@ def process_images_with_gemini(files, key):
     prompt = """
     你是一個財務報銷助手。請讀取這份發票/收據照片或文件，並提取以下資訊：
     1. date: 發票日期，格式請統一轉換為 YYYYMMDD（例如 20260603）。若無法取得年份，預設為當前年份。
-    2. amount: 停車費金額 (數字)。
+    2. amount: 金額 (數字)。
     3. box_2d: 圖片中「收據/發票紙張本體」的範圍座標 [ymin, xmin, ymax, xmax]，數值請以 0 到 1000 之間的整數表示。請貼緊收據邊緣去背。若為 PDF 則輸出 [0, 0, 1000, 1000]。
     4. rotate: 圖片中收據文字的方向。為了讓收據變成「文字由左至右、由上至下正向讀取」的直立長條狀，請判斷需要【順時針旋轉多少度】：
        - 若文字已經正面朝上：輸出 0
@@ -253,213 +260,231 @@ def process_images_with_gemini(files, key):
     注意：絕對不要加上 ```json 或任何 markdown 標記。
     """
 
-    results = []
-    for uploaded_file in files:
-        bytes_data = uploaded_file.read()
-        file_ext = uploaded_file.name.split(".")[-1].lower()
+    bytes_data = uploaded_file.read()
+    file_ext = uploaded_file.name.split(".")[-1].lower()
 
-        if file_ext == "pdf":
-            mime_type = "application/pdf"
-        elif file_ext == "png":
-            mime_type = "image/png"
-        else:
-            mime_type = "image/jpeg"
+    if file_ext == "pdf":
+        mime_type = "application/pdf"
+    elif file_ext == "png":
+        mime_type = "image/png"
+    else:
+        mime_type = "image/jpeg"
 
-        content_part = {"mime_type": mime_type, "data": bytes_data}
+    content_part = {"mime_type": mime_type, "data": bytes_data}
 
-        success = False
-        last_error = ""
+    for model_name in candidate_models:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content([prompt, content_part])
 
-        for model_name in candidate_models:
-            try:
-                model = genai.GenerativeModel(model_name)
-                response = model.generate_content([prompt, content_part])
-
-                raw_text = response.text.strip()
-                clean_text = (
-                    raw_text.replace("```json", "")
-                    .replace("```", "")
-                    .strip()
-                )
-
-                res_json = json.loads(clean_text)
-
-                box_2d = res_json.get("box_2d", [0, 0, 1000, 1000])
-                rotate_deg = res_json.get("rotate", 0)
-
-                if file_ext in ["jpg", "jpeg", "png"]:
-                    processed_bytes = crop_and_rotate_receipt_bytes(
-                        bytes_data, box_2d, rotate_deg
-                    )
-                else:
-                    processed_bytes = bytes_data
-
-                res_json["raw_bytes"] = processed_bytes
-                res_json["file_ext"] = file_ext
-                res_json["filename"] = uploaded_file.name
-                results.append(res_json)
-                success = True
-                break
-            except Exception as e:
-                last_error = str(e)
-                continue
-
-        if not success:
-            st.error(
-                f"❌ 解析檔案 『{uploaded_file.name}』 失敗：{last_error}"
+            raw_text = response.text.strip()
+            clean_text = (
+                raw_text.replace("```json", "")
+                .replace("```", "")
+                .strip()
             )
-            st.stop()
 
-    results.sort(key=lambda x: x["date"])
-    return results
+            res_json = json.loads(clean_text)
 
+            box_2d = res_json.get("box_2d", [0, 0, 1000, 1000])
+            rotate_deg = res_json.get("rotate", 0)
 
-if uploaded_files and user_name and user_dept:
-    if st.button("🤖 AI 辨識單據內容"):
-        with st.spinner("Gemini 分析照片/PDF 中..."):
-            st.session_state["parsed_receipts"] = process_images_with_gemini(
-                uploaded_files, api_key
-            )
-        st.success(
-            f"成功辨識 {len(st.session_state['parsed_receipts'])} 筆單據資料！"
-        )
-
-# 5. 補充欄位與匯出 Excel / Word
-if "parsed_receipts" in st.session_state:
-    receipts = st.session_state["parsed_receipts"]
-
-    st.subheader("📝 補充填寫報銷明細")
-
-    chk_col1, chk_col2, chk_col3, chk_col4 = st.columns(4)
-    same_loc = chk_col1.checkbox("所有【地點】相同")
-    same_km = chk_col2.checkbox("所有【公里數】相同")
-    same_toll = chk_col3.checkbox("所有【過路費】相同")
-    same_reason = chk_col4.checkbox("所有【事由】相同")
-
-    st.markdown("---")
-    details = []
-
-    first_loc, first_km, first_toll, first_reason = "", 0, 0, ""
-
-    for idx, r in enumerate(receipts):
-        formatted_date = format_date_to_excel(r["date"])
-        st.markdown(
-            f"**單據 {idx+1} (日期: {formatted_date} / 停車費: {r['amount']}元)**"
-        )
-        c1, c2, c3, c4 = st.columns(4)
-
-        # 1. 地點欄位
-        if idx == 0:
-            loc_val = c1.text_input(
-                f"地點 #{idx+1}",
-                value="",
-                placeholder="例如：客戶端",
-                key=f"loc_{idx}",
-            )
-            first_loc = loc_val
-        else:
-            if same_loc:
-                loc_val = first_loc
-                c1.text_input(
-                    f"地點 #{idx+1}",
-                    value=first_loc,
-                    disabled=True,
-                    key=f"dis_loc_{idx}",
+            if file_ext in ["jpg", "jpeg", "png"]:
+                processed_bytes = crop_and_rotate_receipt_bytes(
+                    bytes_data, box_2d, rotate_deg
                 )
             else:
+                processed_bytes = bytes_data
+
+            res_json["raw_bytes"] = processed_bytes
+            res_json["file_ext"] = file_ext
+            res_json["filename"] = uploaded_file.name
+            res_json["receipt_type"] = receipt_type  # 'parking' 或 'gas'
+            return res_json
+        except Exception:
+            continue
+
+    return None
+
+
+has_files = (uploaded_parking_files and len(uploaded_parking_files) > 0) or (
+    uploaded_gas_files and len(uploaded_gas_files) > 0
+)
+
+if has_files and user_name and user_dept:
+    if st.button("🤖 AI 辨識單據內容"):
+        with st.spinner("Gemini 分析照片/PDF 中..."):
+            parsed_parking = []
+            parsed_gas = []
+
+            # 辨識停車發票
+            if uploaded_parking_files:
+                for pf in uploaded_parking_files:
+                    res = process_single_file_with_gemini(
+                        pf, "parking", api_key
+                    )
+                    if res:
+                        parsed_parking.append(res)
+
+            # 辨識加油發票
+            if uploaded_gas_files:
+                for gf in uploaded_gas_files:
+                    res = process_single_file_with_gemini(
+                        gf, "gas", api_key
+                    )
+                    if res:
+                        parsed_gas.append(res)
+
+            parsed_parking.sort(key=lambda x: x["date"])
+            parsed_gas.sort(key=lambda x: x["date"])
+
+            st.session_state["parsed_parking"] = parsed_parking
+            st.session_state["parsed_gas"] = parsed_gas
+
+        tot_count = len(parsed_parking) + len(parsed_gas)
+        st.success(f"成功辨識 {tot_count} 筆單據資料（停車: {len(parsed_parking)} 筆，加油: {len(parsed_gas)} 筆）！")
+
+# 5. 補充欄位與匯出 Excel / Word
+if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
+    parking_receipts = st.session_state.get("parsed_parking", [])
+    gas_receipts = st.session_state.get("parsed_gas", [])
+
+    st.subheader("📝 補充填寫報銷明細 (私車公用 Excel)")
+
+    if len(parking_receipts) > 0:
+        chk_col1, chk_col2, chk_col3, chk_col4 = st.columns(4)
+        same_loc = chk_col1.checkbox("所有【地點】相同")
+        same_km = chk_col2.checkbox("所有【公里數】相同")
+        same_toll = chk_col3.checkbox("所有【過路費】相同")
+        same_reason = chk_col4.checkbox("所有【事由】相同")
+
+        st.markdown("---")
+        details = []
+
+        first_loc, first_km, first_toll, first_reason = "", 0, 0, ""
+
+        for idx, r in enumerate(parking_receipts):
+            formatted_date = format_date_to_excel(r["date"])
+            st.markdown(
+                f"**停車單據 {idx+1} (日期: {formatted_date} / 金額: {r['amount']}元)**"
+            )
+            c1, c2, c3, c4 = st.columns(4)
+
+            # 1. 地點欄位
+            if idx == 0:
                 loc_val = c1.text_input(
                     f"地點 #{idx+1}",
                     value="",
                     placeholder="例如：客戶端",
                     key=f"loc_{idx}",
                 )
-
-        # 2. 公里數欄位
-        if idx == 0:
-            km_val = int(
-                c2.number_input(
-                    f"公里數 #{idx+1}", value=0, step=1, key=f"km_{idx}"
-                )
-            )
-            first_km = km_val
-        else:
-            if same_km:
-                km_val = int(first_km)
-                c2.number_input(
-                    f"公里數 #{idx+1}",
-                    value=int(first_km),
-                    disabled=True,
-                    key=f"dis_km_{idx}",
-                )
+                first_loc = loc_val
             else:
+                if same_loc:
+                    loc_val = first_loc
+                    c1.text_input(
+                        f"地點 #{idx+1}",
+                        value=first_loc,
+                        disabled=True,
+                        key=f"dis_loc_{idx}",
+                    )
+                else:
+                    loc_val = c1.text_input(
+                        f"地點 #{idx+1}",
+                        value="",
+                        placeholder="例如：客戶端",
+                        key=f"loc_{idx}",
+                    )
+
+            # 2. 公里數欄位
+            if idx == 0:
                 km_val = int(
                     c2.number_input(
                         f"公里數 #{idx+1}", value=0, step=1, key=f"km_{idx}"
                     )
                 )
-
-        # 3. 回數票/過路費欄位
-        if idx == 0:
-            toll_val = int(
-                c3.number_input(
-                    f"回數票 #{idx+1}", value=0, step=1, key=f"toll_{idx}"
-                )
-            )
-            first_toll = toll_val
-        else:
-            if same_toll:
-                toll_val = int(first_toll)
-                c3.number_input(
-                    f"回數票 #{idx+1}",
-                    value=int(first_toll),
-                    disabled=True,
-                    key=f"dis_toll_{idx}",
-                )
+                first_km = km_val
             else:
+                if same_km:
+                    km_val = int(first_km)
+                    c2.number_input(
+                        f"公里數 #{idx+1}",
+                        value=int(first_km),
+                        disabled=True,
+                        key=f"dis_km_{idx}",
+                    )
+                else:
+                    km_val = int(
+                        c2.number_input(
+                            f"公里數 #{idx+1}", value=0, step=1, key=f"km_{idx}"
+                        )
+                    )
+
+            # 3. 回數票/過路費欄位
+            if idx == 0:
                 toll_val = int(
                     c3.number_input(
                         f"回數票 #{idx+1}", value=0, step=1, key=f"toll_{idx}"
                     )
                 )
-
-        # 4. 事由欄位
-        if idx == 0:
-            reason_val = c4.text_input(
-                f"事由 #{idx+1}",
-                value="",
-                placeholder="例如：拜訪客戶",
-                key=f"reason_{idx}",
-            )
-            first_reason = reason_val
-        else:
-            if same_reason:
-                reason_val = first_reason
-                c4.text_input(
-                    f"事由 #{idx+1}",
-                    value=first_reason,
-                    disabled=True,
-                    key=f"dis_reason_{idx}",
-                )
+                first_toll = toll_val
             else:
+                if same_toll:
+                    toll_val = int(first_toll)
+                    c3.number_input(
+                        f"回數票 #{idx+1}",
+                        value=int(first_toll),
+                        disabled=True,
+                        key=f"dis_toll_{idx}",
+                    )
+                else:
+                    toll_val = int(
+                        c3.number_input(
+                            f"回數票 #{idx+1}", value=0, step=1, key=f"toll_{idx}"
+                        )
+                    )
+
+            # 4. 事由欄位
+            if idx == 0:
                 reason_val = c4.text_input(
                     f"事由 #{idx+1}",
                     value="",
                     placeholder="例如：拜訪客戶",
                     key=f"reason_{idx}",
                 )
+                first_reason = reason_val
+            else:
+                if same_reason:
+                    reason_val = first_reason
+                    c4.text_input(
+                        f"事由 #{idx+1}",
+                        value=first_reason,
+                        disabled=True,
+                        key=f"dis_reason_{idx}",
+                    )
+                else:
+                    reason_val = c4.text_input(
+                        f"事由 #{idx+1}",
+                        value="",
+                        placeholder="例如：拜訪客戶",
+                        key=f"reason_{idx}",
+                    )
 
-        details.append(
-            {
-                "date": formatted_date,
-                "location": loc_val,
-                "km": km_val,
-                "parking": int(round(float(r["amount"]))),
-                "toll": toll_val,
-                "reason": reason_val,
-                "raw_bytes": r["raw_bytes"],
-                "file_ext": r["file_ext"],
-            }
-        )
+            details.append(
+                {
+                    "date": formatted_date,
+                    "location": loc_val,
+                    "km": km_val,
+                    "parking": int(round(float(r["amount"]))),
+                    "toll": toll_val,
+                    "reason": reason_val,
+                    "raw_bytes": r["raw_bytes"],
+                    "file_ext": r["file_ext"],
+                }
+            )
+    else:
+        details = []
+        st.info("💡 目前未上傳停車發票，匯出 Excel 功能將暫跳過，但 Word 憑證仍可正常整合產出！")
 
     st.markdown(" ")
     btn_col1, btn_col2 = st.columns(2)
@@ -467,72 +492,101 @@ if "parsed_receipts" in st.session_state:
     # 產出 Excel
     with btn_col1:
         if st.button("🚀 產出 Excel 報銷檔案"):
-            template_xlsx = "私車公用補助申請單.xlsx"
-
-            if not os.path.exists(template_xlsx):
-                st.error(
-                    "系統找不到範本『私車公用補助申請單.xlsx』！請確認檔名是否包含 .xlsx"
-                )
+            if len(details) == 0:
+                st.warning("⚠️ 請先上傳並填寫至少一筆停車發票明細！")
             else:
-                wb = openpyxl.load_workbook(template_xlsx)
+                template_xlsx = "私車公用補助申請單.xlsx"
 
-                # Sheet 1: 私車公用單
-                ws1 = wb.worksheets[0]
-
-                set_cell_value(ws1, "B3", user_name)
-                set_cell_value(ws1, "E3", user_dept)
-
-                for i, item in enumerate(details):
-                    row_num = 5 + i
-                    set_cell_value(ws1, (row_num, 1), item["date"])
-                    set_cell_value(ws1, (row_num, 2), item["location"])
-                    set_cell_value(ws1, (row_num, 4), item["km"])
-                    set_cell_value(ws1, (row_num, 5), item["parking"])
-                    set_cell_value(ws1, (row_num, 6), item["toll"])
-                    set_cell_value(ws1, (row_num, 8), item["reason"])
-
-                # Sheet 2: 支出憑單
-                ws2 = wb.worksheets[1]
-                today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
-
-                set_cell_value(ws2, "G5", today_str)
-                set_cell_value(ws2, "C7", f"專案編號：{user_name}")
-
-                first_date = details[0]["date"]
-                last_date = details[-1]["date"]
-                set_cell_value(ws2, "A9", f"{first_date}~{last_date}交通費用")
-
-                tot_km = sum(item["km"] for item in details)
-                tot_parking = sum(item["parking"] for item in details)
-                tot_toll = sum(item["toll"] for item in details)
-                grand_total = (tot_km * 6) + tot_parking + tot_toll
-
-                set_cell_value(ws2, "G9", grand_total)
-                set_cell_value(ws2, "G17", grand_total)
-
-                output_date = datetime.datetime.now().strftime("%Y%m%d")
-                out_filename = f"私車公用補助申請單-{user_name}-{output_date}.xlsx"
-
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=".xlsx"
-                ) as tmp:
-                    wb.save(tmp.name)
-                    tmp_path = tmp.name
-
-                with open(tmp_path, "rb") as file:
-                    st.download_button(
-                        label="📥 下載報銷單 (Excel)",
-                        data=file,
-                        file_name=out_filename,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                if not os.path.exists(template_xlsx):
+                    st.error(
+                        "系統找不到範本『私車公用補助申請單.xlsx』！請確認檔名是否包含 .xlsx"
                     )
+                else:
+                    wb = openpyxl.load_workbook(template_xlsx)
 
-    # 產出 Word 報支單據憑證檔 (強行同頁 + 動態等比縮放防跨頁)
+                    # Sheet 1: 私車公用單
+                    ws1 = wb.worksheets[0]
+
+                    set_cell_value(ws1, "B3", user_name)
+                    set_cell_value(ws1, "E3", user_dept)
+
+                    for i, item in enumerate(details):
+                        row_num = 5 + i
+                        set_cell_value(ws1, (row_num, 1), item["date"])
+                        set_cell_value(ws1, (row_num, 2), item["location"])
+                        set_cell_value(ws1, (row_num, 4), item["km"])
+                        set_cell_value(ws1, (row_num, 5), item["parking"])
+                        set_cell_value(ws1, (row_num, 6), item["toll"])
+                        set_cell_value(ws1, (row_num, 8), item["reason"])
+
+                    # Sheet 2: 支出憑單
+                    ws2 = wb.worksheets[1]
+                    today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
+
+                    set_cell_value(ws2, "G5", today_str)
+                    set_cell_value(ws2, "C7", f"專案編號：{user_name}")
+
+                    first_date = details[0]["date"]
+                    last_date = details[-1]["date"]
+                    set_cell_value(ws2, "A9", f"{first_date}~{last_date}交通費用")
+
+                    tot_km = sum(item["km"] for item in details)
+                    tot_parking = sum(item["parking"] for item in details)
+                    tot_toll = sum(item["toll"] for item in details)
+                    grand_total = (tot_km * 6) + tot_parking + tot_toll
+
+                    set_cell_value(ws2, "G9", grand_total)
+                    set_cell_value(ws2, "G17", grand_total)
+
+                    output_date = datetime.datetime.now().strftime("%Y%m%d")
+                    out_filename = f"私車公用補助申請單-{user_name}-{output_date}.xlsx"
+
+                    with tempfile.NamedTemporaryFile(
+                        delete=False, suffix=".xlsx"
+                    ) as tmp:
+                        wb.save(tmp.name)
+                        tmp_path = tmp.name
+
+                    with open(tmp_path, "rb") as file:
+                        st.download_button(
+                            label="📥 下載報銷單 (Excel)",
+                            data=file,
+                            file_name=out_filename,
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        )
+
+    # 產出 Word 報支單據憑證檔 (整合停車與加油發票)
     with btn_col2:
         if st.button("📄 產出 Word 報支單據檔"):
             doc = Document()
 
-            for idx, item in enumerate(details):
+            # 組合所有單據清單 (標記類型: 停車費 / 加油費)
+            all_word_items = []
+
+            for p_item in parking_receipts:
+                all_word_items.append(
+                    {
+                        "date": format_date_to_excel(p_item["date"]),
+                        "title_type": "停車費",
+                        "raw_bytes": p_item["raw_bytes"],
+                        "file_ext": p_item["file_ext"],
+                    }
+                )
+
+            for g_item in gas_receipts:
+                all_word_items.append(
+                    {
+                        "date": format_date_to_excel(g_item["date"]),
+                        "title_type": "加油費",
+                        "raw_bytes": g_item["raw_bytes"],
+                        "file_ext": g_item["file_ext"],
+                    }
+                )
+
+            # 按日期排序
+            all_word_items.sort(key=lambda x: x["date"])
+
+            for idx, item in enumerate(all_word_items):
                 if idx > 0:
                     doc.add_page_break()
 
@@ -542,8 +596,8 @@ if "parsed_receipts" in st.session_state:
                 p.paragraph_format.space_after = Pt(0)
                 p.paragraph_format.line_spacing = 1.0
 
-                # 1. 寫入標題文字
-                run_title = p.add_run(f"{item['date']} 停車費\n\n")
+                # 1. 寫入標題文字 (例如：2026/05/27 停車費 或 2026/05/27 加油費)
+                run_title = p.add_run(f"{item['date']} {item['title_type']}\n\n")
                 run_title.font.size = Pt(14)
                 run_title.font.bold = True
                 run_title.font.name = "標楷體"
