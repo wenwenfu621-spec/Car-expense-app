@@ -4,6 +4,7 @@ import io
 import json
 import os
 import tempfile
+import requests
 import fitz  # PyMuPDF
 import google.generativeai as genai
 import openpyxl
@@ -15,13 +16,31 @@ from PIL import Image, ImageOps
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260817-NAME-ASCENDING-ORDER"
+APP_VERSION = "20260817-BACKGROUND-LOGGER-ADD"
 
 st.set_page_config(
-    page_title=f"私車公用補助單自動化填寫工具 ({APP_VERSION})", layout="centered"
+    page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
 )
 
 st.caption(f"📌 程式版本：`{APP_VERSION}`")
+
+# Google 表單背景紀錄設定
+FORM_RESPONSE_URL = "https://docs.google.com/forms/d/e/1FAIpQLSeWI7dFxqjMeX9H0KxbSYVETuBiTOLEqZs43T06yKdbQofNAQ/formResponse"
+ENTRY_NAME_ID = "entry.505350995"
+ENTRY_DEPT_ID = "entry.1840094204"
+
+
+def log_usage_to_google_form(name_val, dept_val):
+    """背景默默傳送使用者姓名與部門紀錄至 Google 表單"""
+    try:
+        form_data = {
+            ENTRY_NAME_ID: name_val if name_val else "NA",
+            ENTRY_DEPT_ID: dept_val if dept_val else "NA",
+        }
+        # 設定 2 秒 timeout，即使網路異常也不卡頓 UI
+        requests.post(FORM_RESPONSE_URL, data=form_data, timeout=2)
+    except Exception:
+        pass
 
 
 # 注入 JavaScript：強效導航演算法 + 欄位 Enter 導航
@@ -575,6 +594,9 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
 
                     st.info("💡 **提醒：** 檔案下載後，請記得在 **「私車公用補助單」** 與 **「支出憑單」** 頁面上方，加上 **公司抬頭** 的字樣喔！")
 
+                    # 背景自動記錄使用狀況至 Google 表單
+                    log_usage_to_google_form(user_name, user_dept)
+
                     with open(tmp_path, "rb") as file:
                         st.download_button(
                             label="📥 下載報銷單 (Excel)",
@@ -672,6 +694,9 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
             ) as tmp:
                 doc.save(tmp.name)
                 tmp_path = tmp.name
+
+            # 背景自動記錄使用狀況至 Google 表單
+            log_usage_to_google_form(user_name, user_dept)
 
             with open(tmp_path, "rb") as file:
                 st.download_button(
