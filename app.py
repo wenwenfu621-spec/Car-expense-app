@@ -16,7 +16,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260817-LOGGER-FIXED"
+APP_VERSION = "20260817-FORM-LOGGER-FINAL-FIX"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -24,14 +24,14 @@ st.set_page_config(
 
 st.caption(f"📌 程式版本：`{APP_VERSION}`")
 
-# Google 表單背景紀錄設定
+# Google 表單背景紀錄設定 (已更正為純淨提交網址)
 FORM_RESPONSE_URL = "https://docs.google.com/forms/d/e/1FAIpQLSeWI7dFxqjMeX9H0KxbSYVETuBiTOLEqZs43T06yKdbQofNAQ/formResponse"
 ENTRY_NAME_ID = "entry.505350995"
 ENTRY_DEPT_ID = "entry.1840094204"
 
 
 def log_usage_to_google_form(name_val, dept_val):
-    """背景傳送使用者姓名與部門紀錄至 Google 表單"""
+    """背景默默傳送使用者姓名與部門紀錄至 Google 表單"""
     try:
         form_data = {
             ENTRY_NAME_ID: name_val if name_val else "NA",
@@ -40,12 +40,11 @@ def log_usage_to_google_form(name_val, dept_val):
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        res = requests.post(
+        requests.post(
             FORM_RESPONSE_URL, data=form_data, headers=headers, timeout=5
         )
-        return res.status_code == 200
     except Exception:
-        return False
+        pass
 
 
 # 注入 JavaScript：強效導航演算法 + 欄位 Enter 導航
@@ -55,7 +54,6 @@ def inject_enter_and_memory_js():
     function setupInteractions() {
         const doc = window.parent.document;
         
-        // 1. Enter 鍵欄位跳轉導航
         function attachEnterListeners() {
             const allInputs = Array.from(doc.querySelectorAll('input[type="text"], input[type="number"]'));
             allInputs.forEach((input) => {
@@ -348,6 +346,9 @@ has_files = (uploaded_parking_files and len(uploaded_parking_files) > 0) or (
 
 if has_files and user_name and user_dept:
     if st.button("🤖 AI 辨識單據內容"):
+        # 觸發點 1: 點擊 AI 辨識時發送背景紀錄
+        log_usage_to_google_form(user_name, user_dept)
+
         with st.spinner("Gemini 分析照片/PDF 中..."):
             parsed_parking = []
             parsed_gas = []
@@ -532,7 +533,7 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
             if len(details) == 0:
                 st.warning("⚠️ 請先上傳並填寫至少一筆停車發票明細！")
             else:
-                # 點擊按鈕當下發送背景紀錄
+                # 觸發點 2: 點擊產出 Excel 時發送背景紀錄
                 log_usage_to_google_form(user_name, user_dept)
 
                 template_xlsx = "私車公用補助申請單.xlsx"
@@ -544,9 +545,7 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                 else:
                     wb = openpyxl.load_workbook(template_xlsx)
 
-                    # Sheet 1: 私車公用單
                     ws1 = wb.worksheets[0]
-
                     set_cell_value(ws1, "B3", user_name)
                     set_cell_value(ws1, "E3", user_dept)
 
@@ -559,7 +558,6 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                         set_cell_value(ws1, (row_num, 6), item["toll"])
                         set_cell_value(ws1, (row_num, 8), item["reason"])
 
-                    # Sheet 2: 支出憑單
                     ws2 = wb.worksheets[1]
                     today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
 
@@ -590,7 +588,7 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                         tmp_path = tmp.name
 
                     st.info(
-                        "💡 **提醒：** 檔案下載後，請記得在 **「私車公用補助單」** 與 **「支出憑單」** 頁面上方，加上 **公司抬頭** 的字樣喔！"
+                        "💡 **提醒：** 檔案下載後，請記得在 **「私車公用補助單」** 與 **「支出憑單」** 頁面上方，加上 **貴公司抬頭** 的字樣喔！"
                     )
 
                     with open(tmp_path, "rb") as file:
@@ -601,14 +599,13 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         )
 
-    # 產出 Word 報支單據憑證檔 (整合停車與加油發票)
+    # 產出 Word 報支單據憑證檔
     with btn_col2:
         if st.button("📄 產出 Word 報支單據檔"):
-            # 點擊按鈕當下發送背景紀錄
+            # 觸發點 3: 點擊產出 Word 時發送背景紀錄
             log_usage_to_google_form(user_name, user_dept)
 
             doc = Document()
-
             all_word_items = []
 
             for p_item in parking_receipts:
@@ -643,14 +640,12 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                 p.paragraph_format.space_after = Pt(0)
                 p.paragraph_format.line_spacing = 1.0
 
-                # 1. 寫入標題文字
                 run_title = p.add_run(f"{item['date']} {item['title_type']}\n\n")
                 run_title.font.size = Pt(14)
                 run_title.font.bold = True
                 run_title.font.name = "標楷體"
                 run_title._element.rPr.rFonts.set(qn("w:eastAsia"), "標楷體")
 
-                # 2. 寫入圖片
                 raw_bytes = item["raw_bytes"]
                 ext = item["file_ext"]
 
