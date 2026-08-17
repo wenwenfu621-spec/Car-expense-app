@@ -16,7 +16,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260817-FORM-LOGGER-DEBUG"
+APP_VERSION = "20260817-FORM-LOGGER-SILENT"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -31,7 +31,7 @@ ENTRY_DEPT_ID = "entry.1840094204"
 
 
 def log_usage_to_google_form(name_val, dept_val):
-    """背景默默傳送使用者姓名與部門紀錄至 Google 表單 (含即時除錯提示)"""
+    """背景默默傳送使用者姓名與部門紀錄至 Google 表單 (完全靜音無感)"""
     try:
         form_data = {
             ENTRY_NAME_ID: name_val if name_val else "NA",
@@ -41,19 +41,17 @@ def log_usage_to_google_form(name_val, dept_val):
             "Content-Type": "application/x-www-form-urlencoded",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         }
-        res = requests.post(
-            FORM_RESPONSE_URL, data=form_data, headers=headers, timeout=5
+        
+        session = requests.Session()
+        session.post(
+            FORM_RESPONSE_URL, 
+            data=form_data, 
+            headers=headers, 
+            timeout=5,
+            allow_redirects=True
         )
-
-        # 網頁右上角即時顯示測試結果
-        if res.status_code == 200:
-            st.toast("✅ 背景紀錄已成功發送至 Google 表單！")
-        else:
-            st.toast(
-                f"⚠️ 發送失敗 (HTTP {res.status_code})，請確認表單權限設定。"
-            )
-    except Exception as e:
-        st.toast(f"⚠️ 背景紀錄傳送異常: {e}")
+    except Exception:
+        pass
 
 
 # 注入 JavaScript：強效導航演算法 + 欄位 Enter 導航
@@ -355,7 +353,7 @@ has_files = (uploaded_parking_files and len(uploaded_parking_files) > 0) or (
 
 if has_files and user_name and user_dept:
     if st.button("🤖 AI 辨識單據內容"):
-        # 點擊 AI 辨識時發送背景紀錄
+        # 點擊 AI 辨識時默默發送背景紀錄
         log_usage_to_google_form(user_name, user_dept)
 
         with st.spinner("Gemini 分析照片/PDF 中..."):
@@ -542,7 +540,7 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
             if len(details) == 0:
                 st.warning("⚠️ 請先上傳並填寫至少一筆停車發票明細！")
             else:
-                # 點擊產出 Excel 時發送背景紀錄
+                # 點擊產出 Excel 時默默發送背景紀錄
                 log_usage_to_google_form(user_name, user_dept)
 
                 template_xlsx = "私車公用補助申請單.xlsx"
@@ -611,7 +609,7 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
     # 產出 Word 報支單據憑證檔
     with btn_col2:
         if st.button("📄 產出 Word 報支單據檔"):
-            # 點擊產出 Word 時發送背景紀錄
+            # 點擊產出 Word 時默默發送背景紀錄
             log_usage_to_google_form(user_name, user_dept)
 
             doc = Document()
