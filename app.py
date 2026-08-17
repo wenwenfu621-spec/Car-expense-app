@@ -4,7 +4,6 @@ import io
 import json
 import os
 import tempfile
-import requests
 import fitz  # PyMuPDF
 import google.generativeai as genai
 import openpyxl
@@ -13,10 +12,11 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt
 from PIL import Image, ImageOps
+import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260817-BACKGROUND-LOGGER-ADD"
+APP_VERSION = "20260817-LOGGER-FIXED"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -31,16 +31,21 @@ ENTRY_DEPT_ID = "entry.1840094204"
 
 
 def log_usage_to_google_form(name_val, dept_val):
-    """背景默默傳送使用者姓名與部門紀錄至 Google 表單"""
+    """背景傳送使用者姓名與部門紀錄至 Google 表單"""
     try:
         form_data = {
             ENTRY_NAME_ID: name_val if name_val else "NA",
             ENTRY_DEPT_ID: dept_val if dept_val else "NA",
         }
-        # 設定 2 秒 timeout，即使網路異常也不卡頓 UI
-        requests.post(FORM_RESPONSE_URL, data=form_data, timeout=2)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        res = requests.post(
+            FORM_RESPONSE_URL, data=form_data, headers=headers, timeout=5
+        )
+        return res.status_code == 200
     except Exception:
-        pass
+        return False
 
 
 # 注入 JavaScript：強效導航演算法 + 欄位 Enter 導航
@@ -161,7 +166,7 @@ if not api_key:
     st.error("⚠️ 未偵測到有效的 API Key，請確認 Streamlit Secrets 設定。")
     st.stop()
 
-# 3. 基本資料填寫 (姓名依姓氏筆畫「少至多」排序：吳7筆, 林8筆, 陳11筆, 溫12筆, 黃12筆)
+# 3. 基本資料填寫 (姓名依姓氏筆畫「少至多」排序)
 name_options = [
     "NA",
     "吳季穎",  # 吳 (7筆)
@@ -174,7 +179,6 @@ name_options = [
 
 dept_options = ["NA", "伺服器事業部"]
 
-# 初始化 Session State 記憶載入
 if "user_name_selected" not in st.session_state:
     st.session_state["user_name_selected"] = "NA"
 if "user_dept_selected" not in st.session_state:
@@ -183,20 +187,12 @@ if "user_dept_selected" not in st.session_state:
 col1, col2 = st.columns(2)
 
 with col1:
-    user_name = st.selectbox(
-        "姓名",
-        name_options,
-        key="user_name_selected"
-    )
+    user_name = st.selectbox("姓名", name_options, key="user_name_selected")
 
 with col2:
-    user_dept = st.selectbox(
-        "部門",
-        dept_options,
-        key="user_dept_selected"
-    )
+    user_dept = st.selectbox("部門", dept_options, key="user_dept_selected")
 
-# 4. 上傳檔案 (包含 1.停車發票與 2.加油發票)
+# 4. 上傳檔案
 uploaded_parking_files = st.file_uploader(
     "1. 上傳停車發票/收據（照片或 PDF 檔，可多選）",
     type=["jpg", "jpeg", "png", "pdf"],
@@ -211,7 +207,6 @@ uploaded_gas_files = st.file_uploader(
 
 
 def format_date_to_excel(d_str):
-    """將 YYYYMMDD 純數字格式化為標準日期 YYYY/MM/DD"""
     d_str = str(d_str).strip()
     if len(d_str) == 8 and d_str.isdigit():
         return f"{d_str[:4]}/{d_str[4:6]}/{d_str[6:]}"
@@ -219,7 +214,6 @@ def format_date_to_excel(d_str):
 
 
 def set_cell_value(ws, cell_ref, value):
-    """安全寫入函式：自動相容一般儲存格與合併儲存格 (MergedCell)"""
     if isinstance(cell_ref, str):
         cell = ws[cell_ref]
     else:
@@ -234,7 +228,6 @@ def set_cell_value(ws, cell_ref, value):
 
 
 def crop_and_rotate_receipt_bytes(raw_bytes, box_2d, rotate_deg):
-    """將照片轉正 (EXIF 修正)、去背裁切，並旋轉為直立長條方向"""
     try:
         image = Image.open(io.BytesIO(raw_bytes))
         image = ImageOps.exif_transpose(image)
@@ -267,7 +260,6 @@ def crop_and_rotate_receipt_bytes(raw_bytes, box_2d, rotate_deg):
 
 
 def process_single_file_with_gemini(uploaded_file, receipt_type, key):
-    """處理單個發票/收據檔案解析 (receipt_type: 'parking' 或 'gas')"""
     genai.configure(api_key=key.strip())
 
     candidate_models = [
@@ -324,9 +316,7 @@ def process_single_file_with_gemini(uploaded_file, receipt_type, key):
 
             raw_text = response.text.strip()
             clean_text = (
-                raw_text.replace("```json", "")
-                .replace("```", "")
-                .strip()
+                raw_text.replace("```json", "").replace("```", "").strip()
             )
 
             res_json = json.loads(clean_text)
@@ -362,7 +352,6 @@ if has_files and user_name and user_dept:
             parsed_parking = []
             parsed_gas = []
 
-            # 辨識停車發票
             if uploaded_parking_files:
                 for pf in uploaded_parking_files:
                     res = process_single_file_with_gemini(
@@ -371,7 +360,6 @@ if has_files and user_name and user_dept:
                     if res:
                         parsed_parking.append(res)
 
-            # 辨識加油發票
             if uploaded_gas_files:
                 for gf in uploaded_gas_files:
                     res = process_single_file_with_gemini(
@@ -387,7 +375,9 @@ if has_files and user_name and user_dept:
             st.session_state["parsed_gas"] = parsed_gas
 
         tot_count = len(parsed_parking) + len(parsed_gas)
-        st.success(f"成功辨識 {tot_count} 筆單據資料（停車: {len(parsed_parking)} 筆，加油: {len(parsed_gas)} 筆）！")
+        st.success(
+            f"成功辨識 {tot_count} 筆單據資料（停車: {len(parsed_parking)} 筆，加油: {len(parsed_gas)} 筆）！"
+        )
 
 # 5. 補充欄位與匯出 Excel / Word
 if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
@@ -529,7 +519,9 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
             )
     else:
         details = []
-        st.info("💡 目前未上傳停車發票，匯出 Excel 功能將暫跳過，但 Word 憑證仍可正常整合產出！")
+        st.info(
+            "💡 目前未上傳停車發票，匯出 Excel 功能將暫跳過，但 Word 憑證仍可正常整合產出！"
+        )
 
     st.markdown(" ")
     btn_col1, btn_col2 = st.columns(2)
@@ -540,6 +532,9 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
             if len(details) == 0:
                 st.warning("⚠️ 請先上傳並填寫至少一筆停車發票明細！")
             else:
+                # 點擊按鈕當下發送背景紀錄
+                log_usage_to_google_form(user_name, user_dept)
+
                 template_xlsx = "私車公用補助申請單.xlsx"
 
                 if not os.path.exists(template_xlsx):
@@ -584,7 +579,9 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                     set_cell_value(ws2, "G17", grand_total)
 
                     output_date = datetime.datetime.now().strftime("%Y%m%d")
-                    out_filename = f"私車公用補助申請單-{user_name}-{output_date}.xlsx"
+                    out_filename = (
+                        f"私車公用補助申請單-{user_name}-{output_date}.xlsx"
+                    )
 
                     with tempfile.NamedTemporaryFile(
                         delete=False, suffix=".xlsx"
@@ -592,10 +589,9 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                         wb.save(tmp.name)
                         tmp_path = tmp.name
 
-                    st.info("💡 **提醒：** 檔案下載後，請記得在 **「私車公用補助單」** 與 **「支出憑單」** 頁面上方，加上 **公司抬頭** 的字樣喔！")
-
-                    # 背景自動記錄使用狀況至 Google 表單
-                    log_usage_to_google_form(user_name, user_dept)
+                    st.info(
+                        "💡 **提醒：** 檔案下載後，請記得在 **「私車公用補助單」** 與 **「支出憑單」** 頁面上方，加上 **公司抬頭** 的字樣喔！"
+                    )
 
                     with open(tmp_path, "rb") as file:
                         st.download_button(
@@ -608,6 +604,9 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
     # 產出 Word 報支單據憑證檔 (整合停車與加油發票)
     with btn_col2:
         if st.button("📄 產出 Word 報支單據檔"):
+            # 點擊按鈕當下發送背景紀錄
+            log_usage_to_google_form(user_name, user_dept)
+
             doc = Document()
 
             all_word_items = []
@@ -694,9 +693,6 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
             ) as tmp:
                 doc.save(tmp.name)
                 tmp_path = tmp.name
-
-            # 背景自動記錄使用狀況至 Google 表單
-            log_usage_to_google_form(user_name, user_dept)
 
             with open(tmp_path, "rb") as file:
                 st.download_button(
