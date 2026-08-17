@@ -547,7 +547,7 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                         wb.save(tmp.name)
                         tmp_path = tmp.name
 
-                    st.info("💡 **提醒：** 檔案下載後，請記得在 **「私車公用補助單」** 與 **「支出憑單」** 頁面上方，加上 **貴公司抬頭** 的字樣喔！")
+                    st.info("💡 **提醒：** 檔案下載後，請記得在 **「私車公用補助單」** 與 **「支出憑單」** 頁面上方，加上 **公司抬頭** 的字樣喔！")
 
                     with open(tmp_path, "rb") as file:
                         st.download_button(
