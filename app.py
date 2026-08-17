@@ -16,7 +16,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260817-FORM-LOGGER-FINAL-FIX"
+APP_VERSION = "20260817-FORM-LOGGER-HEADER-FIX"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -24,7 +24,7 @@ st.set_page_config(
 
 st.caption(f"📌 程式版本：`{APP_VERSION}`")
 
-# Google 表單背景紀錄設定 (已更正為純淨提交網址)
+# Google 表單背景紀錄設定
 FORM_RESPONSE_URL = "https://docs.google.com/forms/d/e/1FAIpQLSeWI7dFxqjMeX9H0KxbSYVETuBiTOLEqZs43T06yKdbQofNAQ/formResponse"
 ENTRY_NAME_ID = "entry.505350995"
 ENTRY_DEPT_ID = "entry.1840094204"
@@ -38,7 +38,8 @@ def log_usage_to_google_form(name_val, dept_val):
             ENTRY_DEPT_ID: dept_val if dept_val else "NA",
         }
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         }
         requests.post(
             FORM_RESPONSE_URL, data=form_data, headers=headers, timeout=5
@@ -346,7 +347,7 @@ has_files = (uploaded_parking_files and len(uploaded_parking_files) > 0) or (
 
 if has_files and user_name and user_dept:
     if st.button("🤖 AI 辨識單據內容"):
-        # 觸發點 1: 點擊 AI 辨識時發送背景紀錄
+        # 點擊 AI 辨識發送背景紀錄
         log_usage_to_google_form(user_name, user_dept)
 
         with st.spinner("Gemini 分析照片/PDF 中..."):
@@ -533,7 +534,7 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
             if len(details) == 0:
                 st.warning("⚠️ 請先上傳並填寫至少一筆停車發票明細！")
             else:
-                # 觸發點 2: 點擊產出 Excel 時發送背景紀錄
+                # 點擊產出 Excel 時發送背景紀錄
                 log_usage_to_google_form(user_name, user_dept)
 
                 template_xlsx = "私車公用補助申請單.xlsx"
@@ -588,7 +589,7 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                         tmp_path = tmp.name
 
                     st.info(
-                        "💡 **提醒：** 檔案下載後，請記得在 **「私車公用補助單」** 與 **「支出憑單」** 頁面上方，加上 **貴公司抬頭** 的字樣喔！"
+                        "💡 **提醒：** 檔案下載後，請記得在 **「私車公用補助單」** 與 **「支出憑單」** 頁面上方，加上 **公司抬頭** 的字樣喔！"
                     )
 
                     with open(tmp_path, "rb") as file:
@@ -602,7 +603,7 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
     # 產出 Word 報支單據憑證檔
     with btn_col2:
         if st.button("📄 產出 Word 報支單據檔"):
-            # 觸發點 3: 點擊產出 Word 時發送背景紀錄
+            # 點擊產出 Word 時發送背景紀錄
             log_usage_to_google_form(user_name, user_dept)
 
             doc = Document()
