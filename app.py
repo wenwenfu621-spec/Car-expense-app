@@ -15,7 +15,7 @@ from PIL import Image, ImageOps
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260813-GAS-RECEIPT-SUPPORT"
+APP_VERSION = "20260817-EXCEL-NOTICE-ADD"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -299,7 +299,7 @@ def process_single_file_with_gemini(uploaded_file, receipt_type, key):
             res_json["raw_bytes"] = processed_bytes
             res_json["file_ext"] = file_ext
             res_json["filename"] = uploaded_file.name
-            res_json["receipt_type"] = receipt_type  # 'parking' 或 'gas'
+            res_json["receipt_type"] = receipt_type
             return res_json
         except Exception:
             continue
@@ -547,6 +547,8 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                         wb.save(tmp.name)
                         tmp_path = tmp.name
 
+                    st.info("💡 **提醒：** 檔案下載後，請記得在 **「私車公用補助單」** 與 **「支出憑單」** 頁面上方，加上 **貴公司抬頭** 的字樣喔！")
+
                     with open(tmp_path, "rb") as file:
                         st.download_button(
                             label="📥 下載報銷單 (Excel)",
@@ -560,7 +562,6 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
         if st.button("📄 產出 Word 報支單據檔"):
             doc = Document()
 
-            # 組合所有單據清單 (標記類型: 停車費 / 加油費)
             all_word_items = []
 
             for p_item in parking_receipts:
@@ -583,7 +584,6 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                     }
                 )
 
-            # 按日期排序
             all_word_items.sort(key=lambda x: x["date"])
 
             for idx, item in enumerate(all_word_items):
@@ -596,14 +596,14 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                 p.paragraph_format.space_after = Pt(0)
                 p.paragraph_format.line_spacing = 1.0
 
-                # 1. 寫入標題文字 (例如：2026/05/27 停車費 或 2026/05/27 加油費)
+                # 1. 寫入標題文字
                 run_title = p.add_run(f"{item['date']} {item['title_type']}\n\n")
                 run_title.font.size = Pt(14)
                 run_title.font.bold = True
                 run_title.font.name = "標楷體"
                 run_title._element.rPr.rFonts.set(qn("w:eastAsia"), "標楷體")
 
-                # 2. 寫入圖片（動態計算比例防跨頁）
+                # 2. 寫入圖片
                 raw_bytes = item["raw_bytes"]
                 ext = item["file_ext"]
 
