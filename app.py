@@ -15,35 +15,33 @@ from PIL import Image, ImageOps
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260817-EXCEL-NOTICE-ADD"
+APP_VERSION = "20260817-NAME-ASCENDING-ORDER"
 
 st.set_page_config(
-    page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
+    page_title=f"私車公用補助單自動化填寫工具 ({APP_VERSION})", layout="centered"
 )
 
 st.caption(f"📌 程式版本：`{APP_VERSION}`")
 
 
-# 注入 JavaScript：強效導航演算法，完美跳過 disabled 欄位並自動 Focus 下一個可輸入框
-def inject_enter_focus_js():
+# 注入 JavaScript：強效導航演算法 + 欄位 Enter 導航
+def inject_enter_and_memory_js():
     js_code = """
     <script>
-    function setupEnterNavigation() {
+    function setupInteractions() {
         const doc = window.parent.document;
         
-        function attachListeners() {
+        // 1. Enter 鍵欄位跳轉導航
+        function attachEnterListeners() {
             const allInputs = Array.from(doc.querySelectorAll('input[type="text"], input[type="number"]'));
-            
             allInputs.forEach((input) => {
                 if (!input.dataset.enterBound) {
                     input.dataset.enterBound = "true";
                     input.addEventListener('keydown', function(e) {
                         if (e.key === 'Enter') {
                             e.preventDefault();
-                            
                             const validInputs = Array.from(doc.querySelectorAll('input[type="text"]:not([disabled]), input[type="number"]:not([disabled])'));
                             const currentIndex = validInputs.indexOf(this);
-                            
                             if (currentIndex !== -1 && currentIndex < validInputs.length - 1) {
                                 const nextInput = validInputs[currentIndex + 1];
                                 setTimeout(() => {
@@ -59,11 +57,11 @@ def inject_enter_focus_js():
             });
         }
 
-        attachListeners();
-        setInterval(attachListeners, 1000);
+        attachEnterListeners();
+        setInterval(attachEnterListeners, 1000);
     }
     
-    setTimeout(setupEnterNavigation, 300);
+    setTimeout(setupInteractions, 300);
     </script>
     """
     components.html(js_code, height=0, width=0)
@@ -144,12 +142,40 @@ if not api_key:
     st.error("⚠️ 未偵測到有效的 API Key，請確認 Streamlit Secrets 設定。")
     st.stop()
 
-# 3. 基本資料填寫
+# 3. 基本資料填寫 (姓名依姓氏筆畫「少至多」排序：吳7筆, 林8筆, 陳11筆, 溫12筆, 黃12筆)
+name_options = [
+    "NA",
+    "吳季穎",  # 吳 (7筆)
+    "林欣誼",  # 林 (8筆)
+    "陳江科",  # 陳 (11筆)
+    "陳春宇",  # 陳 (11筆)
+    "溫文福",  # 溫 (12筆)
+    "黃緯祺",  # 黃 (12筆)
+]
+
+dept_options = ["NA", "伺服器事業部"]
+
+# 初始化 Session State 記憶載入
+if "user_name_selected" not in st.session_state:
+    st.session_state["user_name_selected"] = "NA"
+if "user_dept_selected" not in st.session_state:
+    st.session_state["user_dept_selected"] = "NA"
+
 col1, col2 = st.columns(2)
+
 with col1:
-    user_name = st.text_input("姓名", value="", placeholder="例如：王大明")
+    user_name = st.selectbox(
+        "姓名",
+        name_options,
+        key="user_name_selected"
+    )
+
 with col2:
-    user_dept = st.text_input("部門", value="", placeholder="例如：研發部")
+    user_dept = st.selectbox(
+        "部門",
+        dept_options,
+        key="user_dept_selected"
+    )
 
 # 4. 上傳檔案 (包含 1.停車發票與 2.加油發票)
 uploaded_parking_files = st.file_uploader(
@@ -655,5 +681,5 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 )
 
-inject_enter_focus_js()
+inject_enter_and_memory_js()
 inject_custom_footer()
