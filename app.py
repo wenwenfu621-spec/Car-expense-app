@@ -17,7 +17,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260818-ENGLISH-NAME-ONLY-UPDATE"
+APP_VERSION = "20260818-DEPT-NAME-CASCADE-UPDATE"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -297,24 +297,38 @@ if not api_key:
     st.error("⚠️ 未偵測到有效的 API Key，請確認 Streamlit Secrets 設定。")
     st.stop()
 
-# 3. 基本資料填寫 (純英文暱稱按 A-Z 順序顯示)
-name_display_options = list(NAME_MAP.keys())
+# 3. 基本資料填寫 (左側部門 ➔ 右側連動姓名)
 dept_options = ["NA", "伺服器事業部"]
 
-if "user_name_selected" not in st.session_state:
-    st.session_state["user_name_selected"] = "NA"
 if "user_dept_selected" not in st.session_state:
     st.session_state["user_dept_selected"] = "NA"
+if "user_name_selected" not in st.session_state:
+    st.session_state["user_name_selected"] = "NA"
 
 col1, col2 = st.columns(2)
 
+# 左邊：先選部門
 with col1:
+    user_dept = st.selectbox("部門", dept_options, key="user_dept_selected")
+
+# 根據部門選擇，決定右邊姓名的動態可選項
+if user_dept == "伺服器事業部":
+    name_display_options = [
+        "Joy",
+        "Junco",
+        "Leon",
+        "Lynn",
+        "Max",
+        "Weichi",
+    ]
+else:
+    name_display_options = ["NA"]
+
+# 右邊：再選姓名
+with col2:
     user_name_display = st.selectbox(
         "姓名", name_display_options, key="user_name_selected"
     )
-
-with col2:
-    user_dept = st.selectbox("部門", dept_options, key="user_dept_selected")
 
 # 自動將選取的英文暱稱轉換還原為純中文真實姓名，供後續 Excel/Word/Google 表單使用
 real_user_name = NAME_MAP.get(user_name_display, user_name_display)
