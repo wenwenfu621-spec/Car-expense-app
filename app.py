@@ -17,7 +17,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260818-ENGLISH-NAME-SORT-UPDATE"
+APP_VERSION = "20260818-ENGLISH-NAME-ONLY-UPDATE"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -58,15 +58,15 @@ FORM_RESPONSE_URL = "https://docs.google.com/forms/d/e/1FAIpQLSeWI7dFxqjMeX9H0Kx
 ENTRY_NAME_ID = "entry.505350995"
 ENTRY_DEPT_ID = "entry.1840094204"
 
-# 英文/中文名稱選單與真實中文姓名對照表 (依英文字母 A-Z 順序排列)
+# 英文暱稱選單與純中文真實姓名對照表 (依英文字母 A-Z 順序排列)
 NAME_MAP = {
     "NA": "NA",
-    "Joy/吳季穎": "吳季穎",
-    "Junco/陳江科": "陳江科",
-    "Leon/陳春宇": "陳春宇",
-    "Lynn/林欣誼": "林欣誼",
-    "Max/溫文福": "溫文福",
-    "Weichi/黃緯祺": "黃緯祺",
+    "Joy": "吳季穎",
+    "Junco": "陳江科",
+    "Leon": "陳春宇",
+    "Lynn": "林欣誼",
+    "Max": "溫文福",
+    "Weichi": "黃緯祺",
 }
 
 
@@ -297,7 +297,7 @@ if not api_key:
     st.error("⚠️ 未偵測到有效的 API Key，請確認 Streamlit Secrets 設定。")
     st.stop()
 
-# 3. 基本資料填寫 (按英文字母 A-Z 順序顯示)
+# 3. 基本資料填寫 (純英文暱稱按 A-Z 順序顯示)
 name_display_options = list(NAME_MAP.keys())
 dept_options = ["NA", "伺服器事業部"]
 
@@ -316,7 +316,7 @@ with col1:
 with col2:
     user_dept = st.selectbox("部門", dept_options, key="user_dept_selected")
 
-# 自動將選取的顯示名稱轉換還原為純中文真實姓名，供後續 Excel/Word/Google 表單使用
+# 自動將選取的英文暱稱轉換還原為純中文真實姓名，供後續 Excel/Word/Google 表單使用
 real_user_name = NAME_MAP.get(user_name_display, user_name_display)
 
 # 4. 上傳檔案
