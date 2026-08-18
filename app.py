@@ -16,7 +16,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260817-FORM-LOGGER-SILENT"
+APP_VERSION = "20260818-MASKED-NAME-UPDATE"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -28,6 +28,17 @@ st.caption(f"📌 程式版本：`{APP_VERSION}`")
 FORM_RESPONSE_URL = "https://docs.google.com/forms/d/e/1FAIpQLSeWI7dFxqjMeX9H0KxbSYVETuBiTOLEqZs43T06yKdbQofNAQ/formResponse"
 ENTRY_NAME_ID = "entry.505350995"
 ENTRY_DEPT_ID = "entry.1840094204"
+
+# 姓名遮蔽與真名對照表 (依姓氏筆畫少至多排序)
+NAME_MAP = {
+    "NA": "NA",
+    "吳○穎": "吳季穎",  # 吳 (7筆)
+    "林○誼": "林欣誼",  # 林 (8筆)
+    "陳○科": "陳江科",  # 陳 (11筆)
+    "陳○宇": "陳春宇",  # 陳 (11筆)
+    "溫○福": "溫文福",  # 溫 (12筆)
+    "黃○祺": "黃緯祺",  # 黃 (12筆)
+}
 
 
 def log_usage_to_google_form(name_val, dept_val):
@@ -41,14 +52,14 @@ def log_usage_to_google_form(name_val, dept_val):
             "Content-Type": "application/x-www-form-urlencoded",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         }
-        
+
         session = requests.Session()
         session.post(
-            FORM_RESPONSE_URL, 
-            data=form_data, 
-            headers=headers, 
+            FORM_RESPONSE_URL,
+            data=form_data,
+            headers=headers,
             timeout=5,
-            allow_redirects=True
+            allow_redirects=True,
         )
     except Exception:
         pass
@@ -171,17 +182,8 @@ if not api_key:
     st.error("⚠️ 未偵測到有效的 API Key，請確認 Streamlit Secrets 設定。")
     st.stop()
 
-# 3. 基本資料填寫 (姓名依姓氏筆畫「少至多」排序)
-name_options = [
-    "NA",
-    "吳季穎",  # 吳 (7筆)
-    "林欣誼",  # 林 (8筆)
-    "陳江科",  # 陳 (11筆)
-    "陳春宇",  # 陳 (11筆)
-    "溫文福",  # 溫 (12筆)
-    "黃緯祺",  # 黃 (12筆)
-]
-
+# 3. 基本資料填寫 (前端顯示遮蔽姓名)
+name_display_options = list(NAME_MAP.keys())
 dept_options = ["NA", "伺服器事業部"]
 
 if "user_name_selected" not in st.session_state:
@@ -192,10 +194,15 @@ if "user_dept_selected" not in st.session_state:
 col1, col2 = st.columns(2)
 
 with col1:
-    user_name = st.selectbox("姓名", name_options, key="user_name_selected")
+    user_name_display = st.selectbox(
+        "姓名", name_display_options, key="user_name_selected"
+    )
 
 with col2:
     user_dept = st.selectbox("部門", dept_options, key="user_dept_selected")
+
+# 自動將選取的遮蔽姓名轉換還原為真實全名，供後續 Excel/Word/Google 表單使用
+real_user_name = NAME_MAP.get(user_name_display, user_name_display)
 
 # 4. 上傳檔案
 uploaded_parking_files = st.file_uploader(
@@ -351,10 +358,10 @@ has_files = (uploaded_parking_files and len(uploaded_parking_files) > 0) or (
     uploaded_gas_files and len(uploaded_gas_files) > 0
 )
 
-if has_files and user_name and user_dept:
+if has_files and real_user_name and user_dept:
     if st.button("🤖 AI 辨識單據內容"):
-        # 點擊 AI 辨識時默默發送背景紀錄
-        log_usage_to_google_form(user_name, user_dept)
+        # 點擊 AI 辨識時發送真實全名至背景紀錄
+        log_usage_to_google_form(real_user_name, user_dept)
 
         with st.spinner("Gemini 分析照片/PDF 中..."):
             parsed_parking = []
@@ -540,8 +547,8 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
             if len(details) == 0:
                 st.warning("⚠️ 請先上傳並填寫至少一筆停車發票明細！")
             else:
-                # 點擊產出 Excel 時默默發送背景紀錄
-                log_usage_to_google_form(user_name, user_dept)
+                # 點擊產出 Excel 時發送真實全名至背景紀錄
+                log_usage_to_google_form(real_user_name, user_dept)
 
                 template_xlsx = "私車公用補助申請單.xlsx"
 
@@ -553,7 +560,8 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                     wb = openpyxl.load_workbook(template_xlsx)
 
                     ws1 = wb.worksheets[0]
-                    set_cell_value(ws1, "B3", user_name)
+                    # 填入真實全名
+                    set_cell_value(ws1, "B3", real_user_name)
                     set_cell_value(ws1, "E3", user_dept)
 
                     for i, item in enumerate(details):
@@ -569,7 +577,8 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                     today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
 
                     set_cell_value(ws2, "G5", today_str)
-                    set_cell_value(ws2, "C7", f"專案編號：{user_name}")
+                    # 填入真實全名
+                    set_cell_value(ws2, "C7", f"專案編號：{real_user_name}")
 
                     first_date = details[0]["date"]
                     last_date = details[-1]["date"]
@@ -584,8 +593,9 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                     set_cell_value(ws2, "G17", grand_total)
 
                     output_date = datetime.datetime.now().strftime("%Y%m%d")
+                    # 檔名使用真實全名
                     out_filename = (
-                        f"私車公用補助申請單-{user_name}-{output_date}.xlsx"
+                        f"私車公用補助申請單-{real_user_name}-{output_date}.xlsx"
                     )
 
                     with tempfile.NamedTemporaryFile(
@@ -609,8 +619,8 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
     # 產出 Word 報支單據憑證檔
     with btn_col2:
         if st.button("📄 產出 Word 報支單據檔"):
-            # 點擊產出 Word 時默默發送背景紀錄
-            log_usage_to_google_form(user_name, user_dept)
+            # 點擊產出 Word 時發送真實全名至背景紀錄
+            log_usage_to_google_form(real_user_name, user_dept)
 
             doc = Document()
             all_word_items = []
@@ -688,7 +698,8 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                         p.add_run(f"[圖片載入失敗: {e}]")
 
             output_date = datetime.datetime.now().strftime("%Y%m%d")
-            word_filename = f"報支單據-{user_name}-{output_date}.docx"
+            # 檔名使用真實全名
+            word_filename = f"報支單據-{real_user_name}-{output_date}.docx"
 
             with tempfile.NamedTemporaryFile(
                 delete=False, suffix=".docx"
