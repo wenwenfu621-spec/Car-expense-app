@@ -17,13 +17,41 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260818-FOOTER-CENTERED-UPDATE"
+APP_VERSION = "20260818-VERSION-TAG-LEFT-UPDATE"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
 )
 
-st.caption(f"📌 程式版本：`{APP_VERSION}`")
+# 注入左下角程式版本標記 CSS
+version_css = f"""
+<style>
+.custom-version-tag {{
+    position: fixed;
+    bottom: 16px;
+    left: 20px;
+    background-color: rgba(255, 255, 255, 0.9);
+    padding: 4px 10px;
+    border-radius: 12px;
+    box-shadow: 0px 2px 6px rgba(0, 0, 0, 0.1);
+    font-size: 0.8rem;
+    color: #555;
+    z-index: 999999;
+    pointer-events: none;
+    font-family: monospace, sans-serif;
+}}
+.custom-version-tag code {{
+    color: #2e7d32;
+    background-color: #f1f8e9;
+    padding: 2px 5px;
+    border-radius: 4px;
+}}
+</style>
+<div class="custom-version-tag">
+    📌 程式版本：<code>{APP_VERSION}</code>
+</div>
+"""
+st.markdown(version_css, unsafe_allow_html=True)
 
 # Google 表單背景紀錄設定
 FORM_RESPONSE_URL = "https://docs.google.com/forms/d/e/1FAIpQLSeWI7dFxqjMeX9H0KxbSYVETuBiTOLEqZs43T06yKdbQofNAQ/formResponse"
