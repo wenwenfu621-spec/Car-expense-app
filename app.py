@@ -17,7 +17,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260818-PROGRESS-BAR-GRID-UPDATE"
+APP_VERSION = "20260818-FOOTER-CENTERED-UPDATE"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -196,7 +196,7 @@ def inject_enter_and_memory_js():
     components.html(js_code, height=0, width=0)
 
 
-# 注入右下角個人專屬署名
+# 注入個人專屬署名 (置於畫面底部正中間)
 def inject_custom_footer():
     avatar_candidates = ["avatar.jpg", "avatar.jpeg", "avatar.png", "avatar.JPG"]
     img_base64 = ""
@@ -223,11 +223,12 @@ def inject_custom_footer():
     .custom-footer-max {{
         position: fixed;
         bottom: 16px;
-        right: 210px;
+        left: 50%;
+        transform: translateX(-50%);
         display: flex;
         align-items: center;
         background-color: rgba(255, 255, 255, 0.95);
-        padding: 4px 12px;
+        padding: 4px 14px;
         border-radius: 20px;
         box-shadow: 0px 2px 8px rgba(0, 0, 0, 0.15);
         z-index: 999999;
