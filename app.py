@@ -4,6 +4,7 @@ import io
 import json
 import os
 import tempfile
+import time
 import fitz  # PyMuPDF
 import google.generativeai as genai
 import openpyxl
@@ -16,7 +17,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260818-MASKED-NAME-UPDATE"
+APP_VERSION = "20260818-RUNNING-PROGRESS-BAR"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -39,6 +40,149 @@ NAME_MAP = {
     "溫○福": "溫文福",  # 溫 (12筆)
     "黃○祺": "黃緯祺",  # 黃 (12筆)
 }
+
+# 跑步小人幀 1 與幀 2 的 Base64 編碼
+FRAME1_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAC7UlEQVR4nO2d3W7DMAhG6bT3f+XuppOyaHYAAwb8nZtK05ofjiGpTVoiAAAAAAAAAAAA5OG1+wA28B78PUUsUhxEACMJI7bF5WvXjgORytC+x4TOGWIV1NAYdc0QyxEemi1dhZSloxCPER2WJd2EeAYuREo3IeWBkGR0EhJRUtz30UlICyAkGRCSDAhJBoQko5OQiElA931UErJtSjySKkLet9e2VBFy5U17lmFD1kUqCBkFP1JK2CJVdiFPJWqWLSXJLoTLXYrliA5dws28pi4Z+bPz0GbQlthkzRDLMqQJ7LaBmjFDvHuo0Cg3YTUTdh+/Od+B+2p1N+SF1wiLDH6rLPE4mV2Z0EKM9UlkKEulxVgefAYZV0qKsTrobDKulBJj8cEwswyi/Mf3h9XRszotoZkeWQlw+mxZOcDVuabI93O2lwJtydoZzOt2S81TcdAIsZqFtdqGVkxKrCbmJNv2Fho9YEyRZEi0DC3pgixBIoR7olYBWdlO2TImvYZw6vmI0qUkCs1FfRQsj2XU49De9t6DX7apIBsrUyev2+sIlCoBq3NZljIA5eo6OT47iHyFoFQpyJQhgPyEIDuUWLcB4SK+SJY1dWTJB6uStZoZyKwPmdbUIYXilnAlHF2+IpZwM207Pd5LuET+q36tkArRyoAUJtxAaYJj1W1y1DWFc7LWJQpSJnBKliQYnP9F+ZpgOZdlLe7OEVK4QlaaGyzf016K9UX9uMY2azgZIgmY5wW7vQyiZyFRP/XgURJL8iREGwhrKe2vHb94fjCUbF+yj9bZYnWXNYIbZMj4IG221t5FHVNyVrHs7X1C+s1wVvsthVVvL5d78CHjhkVvr5QyP2G3A+/e3tl7cF35B4vJRc2kIkrVAKvZXs4dmDS4x8kgsm8l5TxdhVI1waO3d/Z0FUrVA17N1v81N0AGA8/HEY4OrJao50OQHUyiAzATc7wMovgnqDTPuB/Fjkfayn7txQngMwkAAAAAevIDJmhpqjTYVd0AAAAASUVORK5CYII="
+FRAME2_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAACTUlEQVR4nO2b7WrDMAxFnbH3f+XuzwIhLFns6EpX0j0wCqWzax3Lx3HHEEIIIYQQQgghhBAiB1v0FyDhc/G+e3w6C7mScIVLrL48KiFkVsbq/0zTLUOsggqLW6cMsezhsGzpJCQFXYQgejQkSzoIQU7G5mV3EJIKCSGjuhCPvYNpHdWFpENCyJAQMiSEDAkho7oQj8NT0zqyC3E5Evcks5DP6bUEmYUc+YyYx7DmZWcVchV8TykQ0VmF3HGXLfRkFPI02OfPWfZo2DCY7Zn6TM+/a9tqBsHjVVmINS6xyiQkQoZ7fL69K0xAaCf monetary "  # clean padding
+FRAME2_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAACTUlEQVR4nO2b7WrDMAxFnbH3f+XuzwIhLFns6EpX0j0wCqWzax3LX3HHEEIIIYQQQgghhBAiB1v0FyDhc/G+e3w6C7mScIVLrL48KiFkVsbq/0zTLUOsggqLW6cMsezhsGzpJCQFXYQgejQkSzoIQU7G5mV3EJIKCSGjuhCPvYNpHdWFpENCyJAQMiSEDAkho7oQj8NT0zqyC3E5Evcks5DP6bUEmYUc+YyYx7DmZWcVchV8TykQ0VmF3HGXLfRkFPI02OfPWfZo2DCY7Zn6TM+/a9tqBsHjVVmINS6xyiQkQoZ7fL69K0xAaCfNMmN"
+FRAME2_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAACTUlEQVR4nO2b7WrDMAxFnbH3f+XuzwIhLFns6EpX0j0wCqWzax3LX3HHEEIIIYQQQgghhBAiB1v0FyDhc/G+e3w6C7mScIVLrL48KiFkVsbq/0zTLUOsggqLW6cMsezhsGzpJCQFXYQgejQkSzoIQU7G5mV3EJIKCSGjuhCPvYNpHdWFpENCyJAQMiSEDAkho7oQj8NT0zqyC3E5Evcks5DP6bUEmYUc+YyYx7DmZWcVchV8TykQ0VmF3HGXLfRkFPI02OfPWfZo2DCY7Zn6TM+/a9tqBsHjVVmINS6xyiQkQoZ7fL69K0xAaCfNMmN"
+FRAME2_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAACTUlEQVR4nO2b7WrDMAxFnbH3f+XuzwIhLFns6EpX0j0wCqWzax3LX3HHEEIIIYQQQgghhBAiB1v0FyDhc/G+e3w6C7mScIVLrL48KiFkVsbq/0zTLUOsggqLW6cMsezhsGzpJCQFXYQgejQkSzoIQU7G5mV3EJIKCSGjuhCPvYNpHdWFpENCyJAQMiSEDAkho7oQj8NT0zqyC3E5Evcks5DP6bUEmYUc+YyYx7DmZWcVchV8TykQ0VmF3HGXLfRkFPI02OfPWfZo2DCY7Zn6TM+/a9tqBsHjVVmINS6xyiQkQoZ7fL69K0xAaCfNMmN"
+FRAME2_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAACTUlEQVR4nO2b7WrDMAxFnbH3f+XuzwIhLFns6EpX0j0wCqWzax3LX3HHEEIIIYQQQgghhBAiB1v0FyDhc/G+e3w6C7mScIVLrL48KiFkVsbq/0zTLUOsggqLW6cMsezhsGzpJCQFXYQgejQkSzoIQU7G5mV3EJIKCSGjuhCPvYNpHdWFpENCyJAQMiSEDAkho7oQj8NT0zqyC3E5Evcks5DP6bUEmYUc+YyYx7DmZWcVchV8TykQ0VmF3HGXLfRkFPI02OfPWfZo2DCY7Zn6TM+/a9tqBsHjVVmINS6xyiQkQoZ7fL69K0xAaCfNMmN"
+FRAME2_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAACTUlEQVR4nO2b7WrDMAxFnbH3f+XuzwIhLFns6EpX0j0wCqWzax3LX3HHEEIIIYQQQgghhBAiB1v0FyDhc/G+e3w6C7mScIVLrL48KiFkVsbq/0zTLUOsggqLW6cMsezhsGzpJCQFXYQgejQkSzoIQU7G5mV3EJIKCSGjuhCPvYNpHdWFpENCyJAQMiSEDAkho7oQj8NT0zqyC3E5Evcks5DP6bUEmYUc+YyYx7DmZWcVchV8TykQ0VmF3HGXLfRkFPI02OfPWfZo2DCY7Zn6TM+/a9tqBsHjVVmINS6xyiQkQoZ7fL69K0xAaCf"
+FRAME2_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAACTUlEQVR4nO2b7WrDMAxFnbH3f+XuzwIhLFns6EpX0j0wCqWzax3LX3HHEEIIIYQQQgghhBAiB1v0FyDhc/G+e3w6C7mScIVLrL48KiFkVsbq/0zTLUOsggqLW6cMsezhsGzpJCQFXYQgejQkSzoIQU7G5mV3EJIKCSGjuhCPvYNpHdWFpENCyJAQMiSEDAkho7oQj8NT0zqyC3E5Evcks5DP6bUEmYUc+YyYx7DmZWcVchV8TykQ0VmF3HGXLfRkFPI02OfPWfZo2DCY7Zn6TM+/a9tqBsHjVVmINS6xyiQkQoZ7fL69K0xAaCf340yYw=="
+FRAME2_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAACTUlEQVR4nO2b7WrDMAxFnbH3f+XuzwIhLFns6EpX0j0wCqWzax3LX3HHEEIIIYQQQgghhBAiB1v0FyDhc/G+e3w6C7mScIVLrL48KiFkVsbq/0zTLUOsggqLW6cMsezhsGzpJCQFXYQgejQkSzoIQU7G5mV3EJIKCSGjuhCPvYNpHdWFpENCyJAQMiSEDAkho7oQj8NT0zqyC3E5Evcks5DP6bUEmYUc+YyYx7DmZWcVchV8TykQ0VmF3HGXLfRkFPI02OfPWfZo2DCY7Zn6TM+/a9tqBsHjVVmINS6xyiQkQoZ7fL69K0xAaCf"
+
+# 修正後完整的 FRAME2 Base64
+FRAME2_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAACTUlEQVR4nO2b7WrDMAxFnbH3f+XuzwIhLFns6EpX0j0wCqWzax3LX3HHEEIIIYQQQgghhBAiB1v0FyDhc/G+e3w6C7mScIVLrL48KiFkVsbq/0zTLUOsggqLW6cMsezhsGzpJCQFXYQgejQkSzoIQU7G5mV3EJIKCSGjuhCPvYNpHdWFpENCyJAQMiSEDAkho7oQj8NT0zqyC3E5Evcks5DP6bUEmYUc+YyYx7DmZWcVchV8TykQ0VmF3HGXLfRkFPI02OfPWfZo2DCY7Zn6TM+/a9tqBsHjVVmINS6xyiQkQoZ7fL69K0xAaCf340yYw=="
+
+
+def render_running_progress_html(percentage, current_count, total_count):
+    """產出帶有 0-100 刻度進度條與雙幀跑步小人的 HTML/CSS"""
+    pct = max(0, min(100, int(percentage)))
+
+    html_code = f"""
+    <style>
+    .track-container {{
+        position: relative;
+        width: 100%;
+        max-width: 580px;
+        margin: 10px 0 20px 0;
+        font-family: Arial, sans-serif;
+    }}
+    .runner-box {{
+        position: absolute;
+        top: -38px;
+        left: calc({pct}% - 20px);
+        width: 40px;
+        height: 40px;
+        transition: left 0.3s ease-in-out;
+        z-index: 10;
+    }}
+    .runner-img {{
+        width: 40px;
+        height: 40px;
+        object-fit: contain;
+    }}
+    .runner-frame1 {{
+        animation: swapFrames 0.5s steps(1) infinite;
+    }}
+    .runner-frame2 {{
+        animation: swapFrames2 0.5s steps(1) infinite;
+    }}
+    @keyframes swapFrames {{
+        0%, 100% {{ display: block; }}
+        50% {{ display: none; }}
+    }}
+    @keyframes swapFrames2 {{
+        0%, 100% {{ display: none; }}
+        50% {{ display: block; }}
+    }}
+    .progress-bar-outer {{
+        position: relative;
+        width: 100%;
+        height: 42px;
+        border: 3.5px solid #000;
+        background-color: #fff;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        padding: 2px;
+        overflow: hidden;
+    }}
+    .progress-bar-inner {{
+        height: 100%;
+        width: {pct}%;
+        background-color: #000;
+        transition: width 0.3s ease-in-out;
+    }}
+    .ticks-overlay {{
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        justify-content: space-between;
+        pointer-events: none;
+    }}
+    .tick-block {{
+        flex: 1;
+        border-right: 2px solid #000;
+        position: relative;
+    }}
+    .tick-block:last-child {{
+        border-right: none;
+    }}
+    .tick-label {{
+        position: absolute;
+        top: -24px;
+        right: -10px;
+        font-size: 11px;
+        font-weight: bold;
+        color: #000;
+    }}
+    .tick-label-0 {{
+        position: absolute;
+        top: -24px;
+        left: -4px;
+        font-size: 11px;
+        font-weight: bold;
+        color: #000;
+    }}
+    .status-text {{
+        font-size: 0.95rem;
+        font-weight: bold;
+        color: #333;
+        margin-bottom: 30px;
+    }}
+    </style>
+    
+    <div class="track-container">
+        <div class="status-text">
+            🔄 Gemini 分析單據中 ({current_count}/{total_count} 張) - {pct}%
+        </div>
+        <div class="runner-box">
+            <img class="runner-img runner-frame1" src="data:image/png;base64,{FRAME1_BASE64}" />
+            <img class="runner-img runner-frame2" src="data:image/png;base64,{FRAME2_BASE64}" />
+        </div>
+        <div class="progress-bar-outer">
+            <div class="progress-bar-inner"></div>
+            <div class="ticks-overlay">
+                <div class="tick-block"><span class="tick-label-0">0</span><span class="tick-label">10</span></div>
+                <div class="tick-block"><span class="tick-label">20</span></div>
+                <div class="tick-block"><span class="tick-label">30</span></div>
+                <div class="tick-block"><span class="tick-label">40</span></div>
+                <div class="tick-block"><span class="tick-label">50</span></div>
+                <div class="tick-block"><span class="tick-label">60</span></div>
+                <div class="tick-block"><span class="tick-label">70</span></div>
+                <div class="tick-block"><span class="tick-label">80</span></div>
+                <div class="tick-block"><span class="tick-label">90</span></div>
+                <div class="tick-block"><span class="tick-label">100</span></div>
+            </div>
+        </div>
+    </div>
+    """
+    return html_code
 
 
 def log_usage_to_google_form(name_val, dept_val):
@@ -363,31 +507,56 @@ if has_files and real_user_name and user_dept:
         # 點擊 AI 辨識時發送真實全名至背景紀錄
         log_usage_to_google_form(real_user_name, user_dept)
 
-        with st.spinner("Gemini 分析照片/PDF 中..."):
-            parsed_parking = []
-            parsed_gas = []
+        parsed_parking = []
+        parsed_gas = []
 
-            if uploaded_parking_files:
-                for pf in uploaded_parking_files:
-                    res = process_single_file_with_gemini(
-                        pf, "parking", api_key
-                    )
-                    if res:
-                        parsed_parking.append(res)
+        # 整理所有待處理檔案清單
+        file_queue = []
+        if uploaded_parking_files:
+            for pf in uploaded_parking_files:
+                file_queue.append((pf, "parking"))
+        if uploaded_gas_files:
+            for gf in uploaded_gas_files:
+                file_queue.append((gf, "gas"))
 
-            if uploaded_gas_files:
-                for gf in uploaded_gas_files:
-                    res = process_single_file_with_gemini(
-                        gf, "gas", api_key
-                    )
-                    if res:
-                        parsed_gas.append(res)
+        total_files = len(file_queue)
 
-            parsed_parking.sort(key=lambda x: x["date"])
-            parsed_gas.sort(key=lambda x: x["date"])
+        # 動態進度條容器
+        progress_placeholder = st.empty()
 
-            st.session_state["parsed_parking"] = parsed_parking
-            st.session_state["parsed_gas"] = parsed_gas
+        # 初始畫面 0%
+        progress_placeholder.markdown(
+            render_running_progress_html(0, 0, total_files),
+            unsafe_allow_html=True,
+        )
+
+        for current_idx, (f, r_type) in enumerate(file_queue):
+            res = process_single_file_with_gemini(f, r_type, api_key)
+            if res:
+                if r_type == "parking":
+                    parsed_parking.append(res)
+                else:
+                    parsed_gas.append(res)
+
+            # 更新進度條趴數與小人跑步位置
+            done_count = current_idx + 1
+            current_pct = int((done_count / total_files) * 100)
+            progress_placeholder.markdown(
+                render_running_progress_html(
+                    current_pct, done_count, total_files
+                ),
+                unsafe_allow_html=True,
+            )
+
+        # 完成後稍微停留讓使用者看見 100% 跑步小人到達終點
+        time.sleep(0.5)
+        progress_placeholder.empty()
+
+        parsed_parking.sort(key=lambda x: x["date"])
+        parsed_gas.sort(key=lambda x: x["date"])
+
+        st.session_state["parsed_parking"] = parsed_parking
+        st.session_state["parsed_gas"] = parsed_gas
 
         tot_count = len(parsed_parking) + len(parsed_gas)
         st.success(
