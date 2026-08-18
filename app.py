@@ -17,7 +17,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260818-VERSION-TAG-LEFT-UPDATE"
+APP_VERSION = "20260818-ENGLISH-NAME-SORT-UPDATE"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -58,28 +58,25 @@ FORM_RESPONSE_URL = "https://docs.google.com/forms/d/e/1FAIpQLSeWI7dFxqjMeX9H0Kx
 ENTRY_NAME_ID = "entry.505350995"
 ENTRY_DEPT_ID = "entry.1840094204"
 
-# 姓名遮蔽與真名對照表 (依姓氏筆畫少至多排序)
+# 英文/中文名稱選單與真實中文姓名對照表 (依英文字母 A-Z 順序排列)
 NAME_MAP = {
     "NA": "NA",
-    "吳○穎": "吳季穎",  # 吳 (7筆)
-    "林○誼": "林欣誼",  # 林 (8筆)
-    "陳○科": "陳江科",  # 陳 (11筆)
-    "陳○宇": "陳春宇",  # 陳 (11筆)
-    "溫○福": "溫文福",  # 溫 (12筆)
-    "黃○祺": "黃緯祺",  # 黃 (12筆)
+    "Joy/吳季穎": "吳季穎",
+    "Junco/陳江科": "陳江科",
+    "Leon/陳春宇": "陳春宇",
+    "Lynn/林欣誼": "林欣誼",
+    "Max/溫文福": "溫文福",
+    "Weichi/黃緯祺": "黃緯祺",
 }
 
 
 def render_block_progress_html(percentage, current_count, total_count):
     """產出 20 格黑色方塊進度條，以 5% 為最小計數單位，數字顯示於右側"""
-    # 將趴數以 5 為單位無條件捨去/四捨五入匹配格數 (例如 23% -> 20%, 25% -> 25%)
     pct_step_5 = int(round(percentage / 5.0)) * 5
     pct_step_5 = max(0, min(100, pct_step_5))
 
-    # 計算填滿的格數 (總共 20 格，每格 5%)
     filled_blocks = pct_step_5 // 5
 
-    # 產生 20 格方塊 HTML
     blocks_html = ""
     for i in range(20):
         if i < filled_blocks:
@@ -300,7 +297,7 @@ if not api_key:
     st.error("⚠️ 未偵測到有效的 API Key，請確認 Streamlit Secrets 設定。")
     st.stop()
 
-# 3. 基本資料填寫 (前端顯示遮蔽姓名)
+# 3. 基本資料填寫 (按英文字母 A-Z 順序顯示)
 name_display_options = list(NAME_MAP.keys())
 dept_options = ["NA", "伺服器事業部"]
 
@@ -319,7 +316,7 @@ with col1:
 with col2:
     user_dept = st.selectbox("部門", dept_options, key="user_dept_selected")
 
-# 自動將選取的遮蔽姓名轉換還原為真實全名，供後續 Excel/Word/Google 表單使用
+# 自動將選取的顯示名稱轉換還原為純中文真實姓名，供後續 Excel/Word/Google 表單使用
 real_user_name = NAME_MAP.get(user_name_display, user_name_display)
 
 # 4. 上傳檔案
@@ -703,7 +700,7 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                     wb = openpyxl.load_workbook(template_xlsx)
 
                     ws1 = wb.worksheets[0]
-                    # 填入真實全名
+                    # 填入純中文真實全名
                     set_cell_value(ws1, "B3", real_user_name)
                     set_cell_value(ws1, "E3", user_dept)
 
@@ -720,7 +717,7 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                     today_str = datetime.datetime.now().strftime("%Y年%m月%d日")
 
                     set_cell_value(ws2, "G5", today_str)
-                    # 填入真實全名
+                    # 填入純中文真實全名
                     set_cell_value(ws2, "C7", f"專案編號：{real_user_name}")
 
                     first_date = details[0]["date"]
@@ -736,7 +733,7 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                     set_cell_value(ws2, "G17", grand_total)
 
                     output_date = datetime.datetime.now().strftime("%Y%m%d")
-                    # 檔名使用真實全名
+                    # 檔名使用純中文真實全名
                     out_filename = (
                         f"私車公用補助申請單-{real_user_name}-{output_date}.xlsx"
                     )
@@ -841,7 +838,7 @@ if "parsed_parking" in st.session_state or "parsed_gas" in st.session_state:
                         p.add_run(f"[圖片載入失敗: {e}]")
 
             output_date = datetime.datetime.now().strftime("%Y%m%d")
-            # 檔名使用真實全名
+            # 檔名使用純中文真實全名
             word_filename = f"報支單據-{real_user_name}-{output_date}.docx"
 
             with tempfile.NamedTemporaryFile(
