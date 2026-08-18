@@ -17,7 +17,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "20260818-RUNNING-PROGRESS-BAR"
+APP_VERSION = "20260818-PROGRESS-BAR-GRID-UPDATE"
 
 st.set_page_config(
     page_title=f"私車公用補助單自動化工具 ({APP_VERSION})", layout="centered"
@@ -41,143 +41,88 @@ NAME_MAP = {
     "黃○祺": "黃緯祺",  # 黃 (12筆)
 }
 
-# 跑步小人幀 1 與幀 2 的 Base64 編碼
-FRAME1_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAC7UlEQVR4nO2d3W7DMAhG6bT3f+XuppOyaHYAAwb8nZtK05ofjiGpTVoiAAAAAAAAAAAA5OG1+wA28B78PUUsUhxEACMJI7bF5WvXjgORytC+x4TOGWIV1NAYdc0QyxEemi1dhZSloxCPER2WJd2EeAYuREo3IeWBkGR0EhJRUtz30UlICyAkGRCSDAhJBoQko5OQiElA931UErJtSjySKkLet9e2VBFy5U17lmFD1kUqCBkFP1JK2CJVdiFPJWqWLSXJLoTLXYrliA5dws28pi4Z+bPz0GbQlthkzRDLMqQJ7LaBmjFDvHuo0Cg3YTUTdh+/Od+B+2p1N+SF1wiLDH6rLPE4mV2Z0EKM9UlkKEulxVgefAYZV0qKsTrobDKulBJj8cEwswyi/Mf3h9XRszotoZkeWQlw+mxZOcDVuabI93O2lwJtydoZzOt2S81TcdAIsZqFtdqGVkxKrCbmJNv2Fho9YEyRZEi0DC3pgixBIoR7olYBWdlO2TImvYZw6vmI0qUkCs1FfRQsj2XU49De9t6DX7apIBsrUyev2+sIlCoBq3NZljIA5eo6OT47iHyFoFQpyJQhgPyEIDuUWLcB4SK+SJY1dWTJB6uStZoZyKwPmdbUIYXilnAlHF2+IpZwM207Pd5LuET+q36tkArRyoAUJtxAaYJj1W1y1DWFc7LWJQpSJnBKliQYnP9F+ZpgOZdlLe7OEVK4QlaaGyzf016K9UX9uMY2azgZIgmY5wW7vQyiZyFRP/XgURJL8iREGwhrKe2vHb94fjCUbF+yj9bZYnWXNYIbZMj4IG221t5FHVNyVrHs7X1C+s1wVvsthVVvL5d78CHjhkVvr5QyP2G3A+/e3tl7cF35B4vJRc2kIkrVAKvZXs4dmDS4x8kgsm8l5TxdhVI1waO3d/Z0FUrVA17N1v81N0AGA8/HEY4OrJao50OQHUyiAzATc7wMovgnqDTPuB/Fjkfayn7txQngMwkAAAAAevIDJmhpqjTYVd0AAAAASUVORK5CYII="
-FRAME2_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAACTUlEQVR4nO2b7WrDMAxFnbH3f+XuzwIhLFns6EpX0j0wCqWzax3Lx3HHEEIIIYQQQgghhBAiB1v0FyDhc/G+e3w6C7mScIVLrL48KiFkVsbq/0zTLUOsggqLW6cMsezhsGzpJCQFXYQgejQkSzoIQU7G5mV3EJIKCSGjuhCPvYNpHdWFpENCyJAQMiSEDAkho7oQj8NT0zqyC3E5Evcks5DP6bUEmYUc+YyYx7DmZWcVchV8TykQ0VmF3HGXLfRkFPI02OfPWfZo2DCY7Zn6TM+/a9tqBsHjVVmINS6xyiQkQoZ7fL69K0xAaCf monetary "  # clean padding
-FRAME2_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAACTUlEQVR4nO2b7WrDMAxFnbH3f+XuzwIhLFns6EpX0j0wCqWzax3LX3HHEEIIIYQQQgghhBAiB1v0FyDhc/G+e3w6C7mScIVLrL48KiFkVsbq/0zTLUOsggqLW6cMsezhsGzpJCQFXYQgejQkSzoIQU7G5mV3EJIKCSGjuhCPvYNpHdWFpENCyJAQMiSEDAkho7oQj8NT0zqyC3E5Evcks5DP6bUEmYUc+YyYx7DmZWcVchV8TykQ0VmF3HGXLfRkFPI02OfPWfZo2DCY7Zn6TM+/a9tqBsHjVVmINS6xyiQkQoZ7fL69K0xAaCfNMmN"
-FRAME2_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAACTUlEQVR4nO2b7WrDMAxFnbH3f+XuzwIhLFns6EpX0j0wCqWzax3LX3HHEEIIIYQQQgghhBAiB1v0FyDhc/G+e3w6C7mScIVLrL48KiFkVsbq/0zTLUOsggqLW6cMsezhsGzpJCQFXYQgejQkSzoIQU7G5mV3EJIKCSGjuhCPvYNpHdWFpENCyJAQMiSEDAkho7oQj8NT0zqyC3E5Evcks5DP6bUEmYUc+YyYx7DmZWcVchV8TykQ0VmF3HGXLfRkFPI02OfPWfZo2DCY7Zn6TM+/a9tqBsHjVVmINS6xyiQkQoZ7fL69K0xAaCfNMmN"
-FRAME2_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAACTUlEQVR4nO2b7WrDMAxFnbH3f+XuzwIhLFns6EpX0j0wCqWzax3LX3HHEEIIIYQQQgghhBAiB1v0FyDhc/G+e3w6C7mScIVLrL48KiFkVsbq/0zTLUOsggqLW6cMsezhsGzpJCQFXYQgejQkSzoIQU7G5mV3EJIKCSGjuhCPvYNpHdWFpENCyJAQMiSEDAkho7oQj8NT0zqyC3E5Evcks5DP6bUEmYUc+YyYx7DmZWcVchV8TykQ0VmF3HGXLfRkFPI02OfPWfZo2DCY7Zn6TM+/a9tqBsHjVVmINS6xyiQkQoZ7fL69K0xAaCfNMmN"
-FRAME2_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAACTUlEQVR4nO2b7WrDMAxFnbH3f+XuzwIhLFns6EpX0j0wCqWzax3LX3HHEEIIIYQQQgghhBAiB1v0FyDhc/G+e3w6C7mScIVLrL48KiFkVsbq/0zTLUOsggqLW6cMsezhsGzpJCQFXYQgejQkSzoIQU7G5mV3EJIKCSGjuhCPvYNpHdWFpENCyJAQMiSEDAkho7oQj8NT0zqyC3E5Evcks5DP6bUEmYUc+YyYx7DmZWcVchV8TykQ0VmF3HGXLfRkFPI02OfPWfZo2DCY7Zn6TM+/a9tqBsHjVVmINS6xyiQkQoZ7fL69K0xAaCfNMmN"
-FRAME2_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAACTUlEQVR4nO2b7WrDMAxFnbH3f+XuzwIhLFns6EpX0j0wCqWzax3LX3HHEEIIIYQQQgghhBAiB1v0FyDhc/G+e3w6C7mScIVLrL48KiFkVsbq/0zTLUOsggqLW6cMsezhsGzpJCQFXYQgejQkSzoIQU7G5mV3EJIKCSGjuhCPvYNpHdWFpENCyJAQMiSEDAkho7oQj8NT0zqyC3E5Evcks5DP6bUEmYUc+YyYx7DmZWcVchV8TykQ0VmF3HGXLfRkFPI02OfPWfZo2DCY7Zn6TM+/a9tqBsHjVVmINS6xyiQkQoZ7fL69K0xAaCf"
-FRAME2_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAACTUlEQVR4nO2b7WrDMAxFnbH3f+XuzwIhLFns6EpX0j0wCqWzax3LX3HHEEIIIYQQQgghhBAiB1v0FyDhc/G+e3w6C7mScIVLrL48KiFkVsbq/0zTLUOsggqLW6cMsezhsGzpJCQFXYQgejQkSzoIQU7G5mV3EJIKCSGjuhCPvYNpHdWFpENCyJAQMiSEDAkho7oQj8NT0zqyC3E5Evcks5DP6bUEmYUc+YyYx7DmZWcVchV8TykQ0VmF3HGXLfRkFPI02OfPWfZo2DCY7Zn6TM+/a9tqBsHjVVmINS6xyiQkQoZ7fL69K0xAaCf340yYw=="
-FRAME2_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAACTUlEQVR4nO2b7WrDMAxFnbH3f+XuzwIhLFns6EpX0j0wCqWzax3LX3HHEEIIIYQQQgghhBAiB1v0FyDhc/G+e3w6C7mScIVLrL48KiFkVsbq/0zTLUOsggqLW6cMsezhsGzpJCQFXYQgejQkSzoIQU7G5mV3EJIKCSGjuhCPvYNpHdWFpENCyJAQMiSEDAkho7oQj8NT0zqyC3E5Evcks5DP6bUEmYUc+YyYx7DmZWcVchV8TykQ0VmF3HGXLfRkFPI02OfPWfZo2DCY7Zn6TM+/a9tqBsHjVVmINS6xyiQkQoZ7fL69K0xAaCf"
 
-# 修正後完整的 FRAME2 Base64
-FRAME2_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAACTUlEQVR4nO2b7WrDMAxFnbH3f+XuzwIhLFns6EpX0j0wCqWzax3LX3HHEEIIIYQQQgghhBAiB1v0FyDhc/G+e3w6C7mScIVLrL48KiFkVsbq/0zTLUOsggqLW6cMsezhsGzpJCQFXYQgejQkSzoIQU7G5mV3EJIKCSGjuhCPvYNpHdWFpENCyJAQMiSEDAkho7oQj8NT0zqyC3E5Evcks5DP6bUEmYUc+YyYx7DmZWcVchV8TykQ0VmF3HGXLfRkFPI02OfPWfZo2DCY7Zn6TM+/a9tqBsHjVVmINS6xyiQkQoZ7fL69K0xAaCf340yYw=="
+def render_block_progress_html(percentage, current_count, total_count):
+    """產出 20 格黑色方塊進度條，以 5% 為最小計數單位，數字顯示於右側"""
+    # 將趴數以 5 為單位無條件捨去/四捨五入匹配格數 (例如 23% -> 20%, 25% -> 25%)
+    pct_step_5 = int(round(percentage / 5.0)) * 5
+    pct_step_5 = max(0, min(100, pct_step_5))
 
+    # 計算填滿的格數 (總共 20 格，每格 5%)
+    filled_blocks = pct_step_5 // 5
 
-def render_running_progress_html(percentage, current_count, total_count):
-    """產出帶有 0-100 刻度進度條與雙幀跑步小人的 HTML/CSS"""
-    pct = max(0, min(100, int(percentage)))
+    # 產生 20 格方塊 HTML
+    blocks_html = ""
+    for i in range(20):
+        if i < filled_blocks:
+            blocks_html += '<div class="block filled"></div>'
+        else:
+            blocks_html += '<div class="block empty"></div>'
 
     html_code = f"""
     <style>
-    .track-container {{
-        position: relative;
+    .progress-wrapper {{
         width: 100%;
-        max-width: 580px;
-        margin: 10px 0 20px 0;
+        max-width: 620px;
+        margin: 15px 0 25px 0;
         font-family: Arial, sans-serif;
     }}
-    .runner-box {{
-        position: absolute;
-        top: -38px;
-        left: calc({pct}% - 20px);
-        width: 40px;
-        height: 40px;
-        transition: left 0.3s ease-in-out;
-        z-index: 10;
-    }}
-    .runner-img {{
-        width: 40px;
-        height: 40px;
-        object-fit: contain;
-    }}
-    .runner-frame1 {{
-        animation: swapFrames 0.5s steps(1) infinite;
-    }}
-    .runner-frame2 {{
-        animation: swapFrames2 0.5s steps(1) infinite;
-    }}
-    @keyframes swapFrames {{
-        0%, 100% {{ display: block; }}
-        50% {{ display: none; }}
-    }}
-    @keyframes swapFrames2 {{
-        0%, 100% {{ display: none; }}
-        50% {{ display: block; }}
-    }}
-    .progress-bar-outer {{
-        position: relative;
-        width: 100%;
-        height: 42px;
-        border: 3.5px solid #000;
-        background-color: #fff;
-        box-sizing: border-box;
-        display: flex;
-        align-items: center;
-        padding: 2px;
-        overflow: hidden;
-    }}
-    .progress-bar-inner {{
-        height: 100%;
-        width: {pct}%;
-        background-color: #000;
-        transition: width 0.3s ease-in-out;
-    }}
-    .ticks-overlay {{
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        display: flex;
-        justify-content: space-between;
-        pointer-events: none;
-    }}
-    .tick-block {{
-        flex: 1;
-        border-right: 2px solid #000;
-        position: relative;
-    }}
-    .tick-block:last-child {{
-        border-right: none;
-    }}
-    .tick-label {{
-        position: absolute;
-        top: -24px;
-        right: -10px;
-        font-size: 11px;
-        font-weight: bold;
-        color: #000;
-    }}
-    .tick-label-0 {{
-        position: absolute;
-        top: -24px;
-        left: -4px;
-        font-size: 11px;
-        font-weight: bold;
-        color: #000;
-    }}
-    .status-text {{
+    .status-title {{
         font-size: 0.95rem;
         font-weight: bold;
         color: #333;
-        margin-bottom: 30px;
+        margin-bottom: 8px;
+    }}
+    .bar-row {{
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }}
+    .progress-container {{
+        flex: 1;
+        display: flex;
+        height: 38px;
+        border: 3px solid #000;
+        background-color: #fff;
+        padding: 2px;
+        box-sizing: border-box;
+        gap: 2px;
+    }}
+    .block {{
+        flex: 1;
+        height: 100%;
+        box-sizing: border-box;
+        transition: background-color 0.2s ease-in-out;
+    }}
+    .block.filled {{
+        background-color: #000;
+    }}
+    .block.empty {{
+        background-color: #fff;
+        border-right: 1px solid #ddd;
+    }}
+    .block.empty:last-child {{
+        border-right: none;
+    }}
+    .pct-display {{
+        font-size: 1.25rem;
+        font-weight: 800;
+        color: #000;
+        min-width: 55px;
+        text-align: right;
     }}
     </style>
     
-    <div class="track-container">
-        <div class="status-text">
-            🔄 Gemini 分析單據中 ({current_count}/{total_count} 張) - {pct}%
+    <div class="progress-wrapper">
+        <div class="status-title">
+            🔄 Gemini 分析單據中 ({current_count}/{total_count} 張)
         </div>
-        <div class="runner-box">
-            <img class="runner-img runner-frame1" src="data:image/png;base64,{FRAME1_BASE64}" />
-            <img class="runner-img runner-frame2" src="data:image/png;base64,{FRAME2_BASE64}" />
-        </div>
-        <div class="progress-bar-outer">
-            <div class="progress-bar-inner"></div>
-            <div class="ticks-overlay">
-                <div class="tick-block"><span class="tick-label-0">0</span><span class="tick-label">10</span></div>
-                <div class="tick-block"><span class="tick-label">20</span></div>
-                <div class="tick-block"><span class="tick-label">30</span></div>
-                <div class="tick-block"><span class="tick-label">40</span></div>
-                <div class="tick-block"><span class="tick-label">50</span></div>
-                <div class="tick-block"><span class="tick-label">60</span></div>
-                <div class="tick-block"><span class="tick-label">70</span></div>
-                <div class="tick-block"><span class="tick-label">80</span></div>
-                <div class="tick-block"><span class="tick-label">90</span></div>
-                <div class="tick-block"><span class="tick-label">100</span></div>
+        <div class="bar-row">
+            <div class="progress-container">
+                {blocks_html}
+            </div>
+            <div class="pct-display">
+                {pct_step_5}%
             </div>
         </div>
     </div>
@@ -526,7 +471,7 @@ if has_files and real_user_name and user_dept:
 
         # 初始畫面 0%
         progress_placeholder.markdown(
-            render_running_progress_html(0, 0, total_files),
+            render_block_progress_html(0, 0, total_files),
             unsafe_allow_html=True,
         )
 
@@ -538,17 +483,17 @@ if has_files and real_user_name and user_dept:
                 else:
                     parsed_gas.append(res)
 
-            # 更新進度條趴數與小人跑步位置
+            # 更新進度條趴數與 20 格方塊
             done_count = current_idx + 1
             current_pct = int((done_count / total_files) * 100)
             progress_placeholder.markdown(
-                render_running_progress_html(
+                render_block_progress_html(
                     current_pct, done_count, total_files
                 ),
                 unsafe_allow_html=True,
             )
 
-        # 完成後稍微停留讓使用者看見 100% 跑步小人到達終點
+        # 完成後稍微停留讓使用者看見 100% 填滿狀態
         time.sleep(0.5)
         progress_placeholder.empty()
 
